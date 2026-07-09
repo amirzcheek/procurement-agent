@@ -1,0 +1,21 @@
+# В образ идут backend/ и frontend/ (фронт собирается на стадии 1). Исключаем лишнее.
+.git
+.gitignore
+.claude
+__pycache__
+**/__pycache__
+**/*.pyc
+backend/.venv
+backend/static
+backend/data
+backend/jobs
+frontend/node_modules
+frontend/dist
+nginx
+caddy
+*.service
+DEPLOY.md
+README.md
+docker-compose.yml
+.env
+.env.example

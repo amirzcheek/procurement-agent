@@ -1,0 +1,4 @@
+# Опционально: рендер страниц магазинов для SEARCH_PROVIDER=serper.
+# НЕ нужен для gemini (grounding отдаёт цену сам) и mock.
+# Установка тянет ещё и браузер: python -m playwright install --with-deps chromium
+crawl4ai==0.4.247

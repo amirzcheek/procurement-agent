@@ -1,0 +1,38 @@
+# Развёртывание агента «Анализатор закупок» через Docker (единый сервис:
+# FastAPI отдаёт и API, и собранный React). Запуск:  docker compose up -d --build
+#
+# Имя сервиса = procurement, чтобы Caddy резолвил его по имени:
+#   reverse_proxy procurement:8080
+services:
+  procurement:
+    build:
+      context: .
+      args:
+        # Под-путь агента на портале (слаг) и базовый адрес API (тот же слаг).
+        VITE_BASE: ${VITE_BASE:-/agents/procurement/}
+        VITE_API_BASE: ${VITE_API_BASE:-/agents/procurement}
+        # Ставить crawl4ai+Chromium (нужно только для SEARCH_PROVIDER=serper).
+        # Для gemini/mock оставить false — образ легче и собирается быстрее.
+        INSTALL_CRAWL: ${INSTALL_CRAWL:-false}
+    container_name: procurement
+    restart: unless-stopped
+    # Переменные окружения (LLM, Serper, ROOT_PATH и т.п.) — из .env.
+    env_file: .env
+    expose:
+      - "8080"
+
+    # Caddy ходит к сервису по имени procurement:8080 ВНУТРИ общей docker-сети
+    # платформы (там же, где Caddy и web:3000). Публиковать порт на хост не нужно.
+    networks:
+      - platform
+
+    # Если LLM/OVMS на ТОМ ЖЕ хосте, что и Docker, изнутри контейнера её адрес —
+    # host.docker.internal (для OVMS на отдельном сервере это НЕ нужно):
+    # extra_hosts:
+    #   - "host.docker.internal:host-gateway"
+
+networks:
+  # Внешняя сеть платформы (та, где Caddy и сервис web). Имя подставьте своё.
+  platform:
+    external: true
+    name: ${PLATFORM_NETWORK:-platform}

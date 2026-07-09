@@ -1,0 +1,26 @@
+# Подключение агента «Анализатор закупок» к Caddy основного домена.
+# Единый сервис — FastAPI отдаёт и React, и API под слагом /agents/procurement.
+# Префикс срезается (handle_path), бэкенд видит /, /config, /analyze, /export,
+# /auth/session, /assets/...
+#
+# Вставьте фрагмент в site-блок основного домена (ai.knus.edu.kz).
+
+handle_path /agents/procurement/* {
+    # Гейтинг платформы: проверка прав на агента до проксирования.
+    forward_auth web:3000 {
+        uri /api/auth/agent/Procurement
+
+        # Чтобы в навбаре показывались имя пользователя и «Админка», прокиньте
+        # данные пользователя из ответа auth-сервиса в наш backend (он читает их
+        # в GET /auth/session). Подставьте реальные имена заголовков:
+        # copy_headers Remote-Name Remote-User Remote-Groups X-Is-Admin
+    }
+
+    # Единый сервис агента (имя контейнера из docker-compose), порт 8080.
+    reverse_proxy procurement:8080 {
+        flush_interval -1   # важно для SSE-стриминга прогресса /analyze
+    }
+}
+
+# Запрос без завершающего слеша -> добавить слеш (иначе относительные пути SPA сломаются).
+redir /agents/procurement /agents/procurement/ 308

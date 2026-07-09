@@ -1,0 +1,51 @@
+# systemd-юнит для сервиса «Анализатор закупок» — альтернатива Docker
+# (запуск напрямую через venv).
+#
+# РАСКЛАДКА (предполагается):
+#   /opt/procurement/             — корень развёртывания
+#   /opt/procurement/backend/     — код (app.py, extract.py, ... requirements.txt)
+#   /opt/procurement/.venv/       — виртуальное окружение Python
+#   /opt/procurement/.env         — переменные окружения (из .env.example)
+#
+# УСТАНОВКА:
+#   sudo mkdir -p /opt/procurement
+#   sudo cp -r backend /opt/procurement/
+#   sudo cp .env.example /opt/procurement/.env      # затем отредактировать .env
+#   # --- собрать React под под-путь портала и положить рядом ---
+#   ( cd frontend \
+#     && VITE_BASE=/agents/procurement/ \
+#        VITE_API_BASE=/agents/procurement npm ci && npm run build )
+#   sudo cp -r frontend/dist /opt/procurement/backend/static   # FastAPI отдаёт её
+#   # --- python-окружение ---
+#   sudo python3 -m venv /opt/procurement/.venv
+#   sudo /opt/procurement/.venv/bin/pip install -r /opt/procurement/backend/requirements.txt
+#   # браузер для crawl4ai (нужен для реального поиска цен; для mock не обязателен):
+#   sudo /opt/procurement/.venv/bin/python -m playwright install --with-deps chromium
+#   sudo chown -R www-data:www-data /opt/procurement
+#   sudo cp procurement.service /etc/systemd/system/procurement.service
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now procurement
+#   sudo systemctl status procurement       # проверить
+#   journalctl -u procurement -f            # логи
+#
+# ROOT_PATH и BIND_HOST берутся из /opt/procurement/.env (см. .env.example).
+# FastAPI по умолчанию отдаёт статику из backend/static — отдельный путь не нужен.
+
+[Unit]
+Description=Анализатор закупок (FastAPI/uvicorn)
+After=network.target
+
+[Service]
+User=www-data
+Group=www-data
+WorkingDirectory=/opt/procurement/backend
+EnvironmentFile=/opt/procurement/.env
+# Хост прослушивания берётся из .env (BIND_HOST):
+#   127.0.0.1               — nginx на том же сервере;
+#   внутренний IP web-сервера — nginx на отдельном сервере (+ фаервол на 8080).
+ExecStart=/opt/procurement/.venv/bin/uvicorn app:app --host ${BIND_HOST} --port 8080
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
