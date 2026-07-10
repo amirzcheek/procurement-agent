@@ -111,7 +111,8 @@ def grounded_search(query: str) -> List[dict]:
     markets = ", ".join(s.marketplaces)
     prompt = (
         f"Используя поиск Google, найди актуальные цены на товар: «{query}» "
-        f"на казахстанских маркетплейсах ({markets}). "
+        f"на казахстанских сайтах и маркетплейсах — в первую очередь {markets}, "
+        f"но можно и любые другие казахстанские магазины (цены в тенге). "
         f"Верни ТОЛЬКО JSON-массив (максимум {s.max_prices_per_item} объектов), без пояснений и без markdown. "
         'Каждый объект: {"title": str, "price": number|null, "currency": "KZT", '
         '"url": str, "source": str, "in_stock": bool|null}. '
@@ -146,11 +147,11 @@ def grounded_search(query: str) -> List[dict]:
 
     items = parse_price_items(text, allowed_sources=s.marketplaces)[: s.max_prices_per_item]
     # Ссылки берём из grounding-метаданных (реальные страницы из выдачи Google),
-    # а не из «прямых» URL, которые модель может выдумать.
+    # а не из «прямых» URL, которые модель может выдумать. Домен — из title чанка.
     items = _attach_grounding_urls(items, chunks)
-    # Отбрасываем позиции с реально мёртвой ссылкой (404/410) — чтобы не показывать
-    # недействительные ссылки (grounding иногда цитирует устаревшие страницы).
-    items = _drop_dead_links(items)
+    # Один проход: разворачиваем Google-редирект в прямой URL магазина, восстанавливаем
+    # домен-источник и отсеиваем реально мёртвые ссылки (404/410).
+    items = _resolve_and_filter(items)
     log.info("gemini grounded_search: «%s» → %d цен", query, len(items))
     return items
 
@@ -164,37 +165,45 @@ _BROWSER_HEADERS = {
 }
 
 
-def _drop_dead_links(items: List[dict]) -> List[dict]:
-    """Оставляет только позиции, чья ссылка не отдаёт 404/410. Сомнительные случаи
-    (таймаут/блокировка ботов/иные коды) НЕ отбрасываем — режем только явно мёртвое."""
+def _resolve_and_filter(items: List[dict]) -> List[dict]:
+    """Один GET-проход на ссылку: разворачивает Google-редирект в прямой URL магазина,
+    восстанавливает домен-источник и отсеивает реально мёртвые ссылки (404/410).
+    Сомнительные случаи (таймаут/блок ботов/иные коды) НЕ отбрасываем."""
     if not items:
         return items
-    cache: dict = {}
-    alive: List[dict] = []
+    cache: dict = {}  # orig_url -> (alive, final_url, final_domain)
+    out: List[dict] = []
     try:
         with httpx.Client(follow_redirects=True, timeout=12, headers=_BROWSER_HEADERS) as client:
             for it in items:
                 u = it.get("url") or ""
                 if u not in cache:
-                    cache[u] = _is_alive(client, u)
-                if cache[u]:
-                    alive.append(it)
-                else:
+                    cache[u] = _probe(client, u)
+                alive, final, fdom = cache[u]
+                if not alive:
                     log.info("gemini: отброшена мёртвая ссылка %s", u[:70])
+                    continue
+                if final:
+                    it["url"] = final
+                if fdom and _REDIRECT_HOST not in fdom:
+                    it["source"] = fdom
+                out.append(it)
     except Exception as e:
         log.warning("проверка ссылок не удалась (%s) — оставляю как есть", e)
         return items
-    return alive
+    return out
 
 
-def _is_alive(client: httpx.Client, url: str) -> bool:
+def _probe(client: httpx.Client, url: str):
+    """(жива?, финальный_url, финальный_домен). Тело не скачиваем."""
     if not url:
-        return False
+        return (False, None, None)
     try:
-        with client.stream("GET", url) as r:  # без загрузки тела
-            return r.status_code not in (404, 410)
+        with client.stream("GET", url) as r:
+            final = str(r.url)
+            return (r.status_code not in (404, 410), final, _domain(final))
     except Exception:
-        return True  # сеть/таймаут — не блокируем (режем только явные 404/410)
+        return (True, None, None)  # сеть/таймаут — не блокируем и не меняем URL
 
 
 _REDIRECT_HOST = "vertexaisearch.cloud.google.com"
@@ -206,36 +215,19 @@ def _title_domain(title: Optional[str]) -> str:
 
 
 def _grounding_pool(chunks: List[dict]) -> List[dict]:
-    """Список реальных источников из grounding: [{url, domain, used}].
+    """Список реальных источников из grounding: [{url, domain, used}] (без сети).
 
-    URL из groundingChunks — это ссылки-редиректы Google на реально процитированные
-    страницы. Разворачиваем в прямой URL магазина (если не удалось — редирект всё
-    равно рабочий, ведёт на ту же страницу). Домен берём из title чанка (satu.kz и т.п.).
+    URL из groundingChunks — ссылки-редиректы Google на реально процитированные
+    страницы; домен магазина берём из title чанка (satu.kz, artvance.kz и т.п.).
+    Разворот редиректа и проверка живости — позже, в _resolve_and_filter (один GET).
     """
-    if not chunks:
-        return []
     pool: List[dict] = []
-    try:
-        with httpx.Client(follow_redirects=True, timeout=15,
-                          headers={"User-Agent": "Mozilla/5.0"}) as client:
-            for ch in chunks:
-                web = ch.get("web") or {}
-                uri = (web.get("uri") or "").strip()
-                if not uri:
-                    continue
-                dom = _title_domain(web.get("title"))
-                final = uri
-                if _REDIRECT_HOST in uri:
-                    try:
-                        final = str(client.head(uri).url)
-                    except Exception:
-                        final = uri  # редирект рабочий сам по себе
-                real_dom = _domain(final)
-                if real_dom and _REDIRECT_HOST not in real_dom:
-                    dom = real_dom
-                pool.append({"url": final, "domain": dom, "used": False})
-    except Exception as e:
-        log.warning("grounding pool: %s", e)
+    for ch in chunks or []:
+        web = ch.get("web") or {}
+        uri = (web.get("uri") or "").strip()
+        if not uri:
+            continue
+        pool.append({"url": uri, "domain": _title_domain(web.get("title")), "used": False})
     return pool
 
 
