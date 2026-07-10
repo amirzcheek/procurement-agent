@@ -13,7 +13,7 @@ export const i18n = {
     disclaimer:
       'Предварительный анализ. Цены найдены автоматически и требуют проверки человеком. Это помощник закупщика, а не автоматический отказ поставщику.',
     subtitle: 'Проверка цен коммерческого предложения по рынку и по истории закупок',
-    pick_file: 'Выберите файл КП (.xlsx или текстовый .pdf)',
+    pick_file: 'Выберите файл КП (.xlsx, .pdf или скан/фото — png, jpg)',
     analyze_btn: 'Анализировать',
     cancel_btn: 'Остановить',
     download_xlsx: '⬇ Скачать xlsx',
@@ -75,7 +75,7 @@ export const i18n = {
     kb_title: 'Загрузка в базу знаний',
     kb_desc:
       'Загрузите ранее заключённый договор или КП. Система извлечёт позиции, вы подтвердите — и они пополнят историю закупок для будущего сравнения.',
-    kb_pick: 'Выберите договор/КП (.xlsx или .pdf)',
+    kb_pick: 'Выберите договор/КП (.xlsx, .pdf или скан/фото — png, jpg)',
     kb_extract: 'Извлечь позиции',
     kb_extracting: 'Извлечение…',
     kb_confirm_hint: 'Проверьте извлечённые данные и заполните реквизиты договора.',
@@ -204,7 +204,7 @@ export const i18n = {
     disclaimer:
       'Алдын ала талдау. Бағалар автоматты табылған, адам тексеруін қажет етеді. Бұл сатып алушының көмекшісі, жеткізушіден автоматты бас тарту емес.',
     subtitle: 'Коммерциялық ұсыныс бағаларын нарық және сатып алу тарихы бойынша тексеру',
-    pick_file: 'КҰ файлын таңдаңыз (.xlsx немесе мәтіндік .pdf)',
+    pick_file: 'КҰ файлын таңдаңыз (.xlsx, .pdf немесе скан/фото — png, jpg)',
     analyze_btn: 'Талдау',
     cancel_btn: 'Тоқтату',
     download_xlsx: '⬇ xlsx жүктеу',
@@ -262,7 +262,7 @@ export const i18n = {
     kb_title: 'Білім қорына жүктеу',
     kb_desc:
       'Бұрын жасалған шартты немесе КҰ жүктеңіз. Жүйе позицияларды шығарады, сіз растайсыз — олар салыстыру үшін тарихты толықтырады.',
-    kb_pick: 'Шарт/КҰ таңдаңыз (.xlsx немесе .pdf)',
+    kb_pick: 'Шарт/КҰ таңдаңыз (.xlsx, .pdf немесе скан/фото — png, jpg)',
     kb_extract: 'Позицияларды шығару',
     kb_extracting: 'Шығару…',
     kb_confirm_hint: 'Шығарылған деректерді тексеріп, шарт деректемелерін толтырыңыз.',
@@ -386,7 +386,7 @@ export const i18n = {
     disclaimer:
       'Preliminary analysis. Prices are found automatically and require human review. This is an assistant for the buyer, not an automatic rejection of a supplier.',
     subtitle: 'Check commercial-offer prices against the market and purchase history',
-    pick_file: 'Choose an offer file (.xlsx or text .pdf)',
+    pick_file: 'Choose an offer file (.xlsx, .pdf or a scan/photo — png, jpg)',
     analyze_btn: 'Analyze',
     cancel_btn: 'Stop',
     download_xlsx: '⬇ Download xlsx',
@@ -444,7 +444,7 @@ export const i18n = {
     kb_title: 'Upload to knowledge base',
     kb_desc:
       'Upload a past contract or offer. The system extracts items, you confirm — and they enrich the purchase history for future comparison.',
-    kb_pick: 'Choose a contract/offer (.xlsx or .pdf)',
+    kb_pick: 'Choose a contract/offer (.xlsx, .pdf or a scan/photo — png, jpg)',
     kb_extract: 'Extract items',
     kb_extracting: 'Extracting…',
     kb_confirm_hint: 'Review the extracted data and fill in the contract details.',
