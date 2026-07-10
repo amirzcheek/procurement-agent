@@ -103,6 +103,34 @@ export function conclusionExportUrl(id, period) {
   return `${API_BASE}/contracts/${id}/export${qs ? '?' + qs : ''}`
 }
 
+// ── Аналитика / поиск / аудит (Этап 2, часть 3) ──
+async function getJson(path) {
+  const r = await fetch(`${API_BASE}${path}`)
+  const data = await r.json().catch(() => ({}))
+  if (!r.ok) throw new Error(data.error || `${r.status}`)
+  return data
+}
+
+const pm = (period) => (period?.months != null ? `?period_months=${period.months}` : '')
+
+export const getDashboard = (period) => getJson(`/analytics/dashboard${pm(period)}`)
+export const getSuppliers = (period) => getJson(`/analytics/suppliers${pm(period)}`)
+export const getSupplierCard = (id) => getJson(`/analytics/suppliers/${id}`)
+export const getOffers = (period) => getJson(`/analytics/offers${pm(period)}`)
+export const getItemHistory = (canonical) =>
+  getJson(`/analytics/item-history?canonical=${encodeURIComponent(canonical)}`)
+export const getEmployees = (period) => getJson(`/analytics/employees${pm(period)}`)
+export const getAudit = (filters) => {
+  const p = new URLSearchParams()
+  Object.entries(filters || {}).forEach(([k, v]) => v && p.set(k, v))
+  return getJson(`/audit?${p.toString()}`)
+}
+export const searchContracts = (filters) => {
+  const p = new URLSearchParams()
+  Object.entries(filters || {}).forEach(([k, v]) => v !== '' && v != null && p.set(k, v))
+  return getJson(`/search?${p.toString()}`)
+}
+
 /**
  * POST /analyze c multipart-файлом. Ответ — SSE-поток.
  * Парсим поток вручную (EventSource не умеет POST) и зовём onEvent(obj) на каждое событие.

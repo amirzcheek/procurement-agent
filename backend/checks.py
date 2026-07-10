@@ -227,7 +227,7 @@ def aggregate_risk(checks: List[dict]) -> dict:
 
 
 # ── Оркестрация ──────────────────────────────────────────────────────────────
-def run_all_checks(sess, contract, period_months: Optional[int]) -> dict:
+def run_all_checks(sess, contract, period_months: Optional[int], user_email: Optional[str] = None) -> dict:
     """Выполняет 4 проверки, считает агрегированный риск, пишет в checks и contracts.
     Возвращает {checks, risk_level, risk_factors}."""
     line_items = repository.get_line_items(sess, contract.id)
@@ -254,7 +254,7 @@ def run_all_checks(sess, contract, period_months: Optional[int]) -> dict:
     contract.risk_level = agg["risk_level"]
     contract.risk_factors = {"factors": agg["factors"]}
 
-    repository.audit(sess, None, "run_checks", "contract", contract.id,
+    repository.audit(sess, user_email, "run_checks", "contract", contract.id,
                      {"risk_level": agg["risk_level"],
                       "risks": {c["type"]: c["risk_level"] for c in checks}})
     log.info("проверки договора #%s: итог=%s %s", contract.id, agg["risk_level"],

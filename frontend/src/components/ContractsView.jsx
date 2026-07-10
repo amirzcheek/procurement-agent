@@ -207,7 +207,7 @@ function ContractDetail({ id, onBack }) {
   )
 }
 
-export default function ContractsView({ dbEnabled }) {
+export default function ContractsView({ dbEnabled, openId }) {
   const { t } = useI18n()
   const [data, setData] = useState(null)
   const [selected, setSelected] = useState(null)
@@ -217,6 +217,9 @@ export default function ContractsView({ dbEnabled }) {
     if (!dbEnabled) return
     listContracts().then(setData).catch((e) => setError(String(e.message || e)))
   }, [dbEnabled])
+
+  // Открытие конкретного договора извне (из поиска).
+  useEffect(() => { if (openId) setSelected(openId) }, [openId])
 
   if (!dbEnabled) return <div className="notice">{t('hist_disabled')}</div>
   if (selected) return <ContractDetail id={selected} onBack={() => setSelected(null)} />

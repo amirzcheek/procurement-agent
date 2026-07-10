@@ -791,6 +791,38 @@ tr.clickable:hover td {
   color: var(--ink);
 }
 
+/* ── Аналитика (Этап 2 ч.3) ── */
+.sub-tabs {
+  margin-top: 4px;
+}
+.card-title {
+  font-size: 14px;
+  font-weight: 700;
+  margin-bottom: 10px;
+  color: var(--sub);
+}
+.analytics-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  margin-top: 14px;
+}
+@media (max-width: 860px) {
+  .analytics-grid {
+    grid-template-columns: 1fr;
+  }
+}
+.search-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+@media (max-width: 720px) {
+  .search-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
 /* ── Мобильная адаптация ── */
 @media (max-width: 720px) {
   .summary-cards {

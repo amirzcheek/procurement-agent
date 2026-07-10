@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { analyze, exportUrl, fetchConfig, historicalAnalysis } from './api.js'
 import { useI18n } from './i18n.jsx'
+import { useSession } from './auth/useSession.js'
 import Navbar from './components/Navbar.jsx'
 import Summary from './components/Summary.jsx'
 import ItemsTable from './components/ItemsTable.jsx'
@@ -8,11 +9,28 @@ import PeriodSelector from './components/PeriodSelector.jsx'
 import HistoricalPanel from './components/HistoricalPanel.jsx'
 import KnowledgeView from './components/KnowledgeView.jsx'
 import ContractsView from './components/ContractsView.jsx'
+import AnalyticsView from './components/AnalyticsView.jsx'
+import SearchView from './components/SearchView.jsx'
+import EmployeesView from './components/EmployeesView.jsx'
+import AuditView from './components/AuditView.jsx'
+
+// Вкладки и роли, которым они доступны (Этап 2 ч.3).
+const TABS = [
+  { key: 'analyze', label: 'tab_analyze', roles: ['procurer', 'manager', 'admin'] },
+  { key: 'knowledge', label: 'tab_knowledge', roles: ['procurer', 'admin'] },
+  { key: 'contracts', label: 'tab_contracts', roles: ['procurer', 'manager', 'admin'] },
+  { key: 'analytics', label: 'tab_analytics', roles: ['manager', 'admin'] },
+  { key: 'search', label: 'tab_search', roles: ['manager', 'admin'] },
+  { key: 'employees', label: 'tab_employees', roles: ['procurer', 'manager', 'admin'] },
+  { key: 'audit', label: 'tab_audit', roles: ['admin'] },
+]
 
 export default function App() {
   const { t } = useI18n()
+  const { user } = useSession()
   const [tab, setTab] = useState('analyze')
   const [config, setConfig] = useState(null)
+  const [openContractId, setOpenContractId] = useState(null)
 
   const [file, setFile] = useState(null)
   const [status, setStatus] = useState('idle') // idle | running | done | error
@@ -102,15 +120,11 @@ export default function App() {
         <Navbar />
 
         <nav className="tabs">
-          <button className={'tab' + (tab === 'analyze' ? ' active' : '')} onClick={() => setTab('analyze')}>
-            {t('tab_analyze')}
-          </button>
-          <button className={'tab' + (tab === 'knowledge' ? ' active' : '')} onClick={() => setTab('knowledge')}>
-            {t('tab_knowledge')}
-          </button>
-          <button className={'tab' + (tab === 'contracts' ? ' active' : '')} onClick={() => setTab('contracts')}>
-            {t('tab_contracts')}
-          </button>
+          {TABS.filter((tb) => tb.roles.includes(user.role || 'procurer')).map((tb) => (
+            <button key={tb.key} className={'tab' + (tab === tb.key ? ' active' : '')} onClick={() => setTab(tb.key)}>
+              {t(tb.key === 'employees' && (user.role || 'procurer') === 'procurer' ? 'tab_my_stats' : tb.label)}
+            </button>
+          ))}
         </nav>
 
         <div className="disclaimer" role="note">⚠️ {t('disclaimer')}</div>
@@ -118,7 +132,15 @@ export default function App() {
         {tab === 'knowledge' ? (
           <KnowledgeView dbEnabled={dbEnabled} />
         ) : tab === 'contracts' ? (
-          <ContractsView dbEnabled={dbEnabled} />
+          <ContractsView dbEnabled={dbEnabled} openId={openContractId} />
+        ) : tab === 'analytics' ? (
+          <AnalyticsView dbEnabled={dbEnabled} />
+        ) : tab === 'search' ? (
+          <SearchView dbEnabled={dbEnabled} onOpenContract={(id) => { setOpenContractId(id); setTab('contracts') }} />
+        ) : tab === 'employees' ? (
+          <EmployeesView dbEnabled={dbEnabled} selfOnly={user.role === 'procurer'} />
+        ) : tab === 'audit' ? (
+          <AuditView dbEnabled={dbEnabled} />
         ) : (
           <>
             <h2 className="page-title">{t('agent_name')}</h2>

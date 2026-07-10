@@ -25,6 +25,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
+import analytics as analytics_mod
 import checks as checks_mod
 import conclusion as conclusion_mod
 import db
@@ -115,6 +116,7 @@ def require_role(request: Request, allowed: tuple) -> dict:
 
 
 WRITERS = ("procurer", "admin")  # кто может загружать/подтверждать/запускать проверки
+VIEWERS = ("manager", "admin")   # кто видит аналитику/поиск/dashboard
 
 
 @app.get("/auth/session")
@@ -349,7 +351,8 @@ def contract_check(contract_id: int, req: CheckRequest, request: Request):
             c = repository.get_contract(sess, contract_id)
             if c is None:
                 return JSONResponse({"error": "Договор не найден."}, status_code=404)
-            result = checks_mod.run_all_checks(sess, c, req.period_months)
+            user = current_user(request)
+            result = checks_mod.run_all_checks(sess, c, req.period_months, user["email"] or None)
         return {"ok": True, "contract_id": contract_id, **result}
     except Exception as e:
         log.exception("contract_check упал")
@@ -400,6 +403,110 @@ def contract_export(contract_id: int, period_months: Optional[int] = None):
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f'attachment; filename="contract_{contract_id}.xlsx"'},
     )
+
+
+# ── Аналитика / dashboard / поиск / аудит (Этап 2, часть 3) ─────────────────
+def _period_from(period_months: Optional[int]):
+    df, _dt, _label = knowledge.resolve_period(period_months, None, None)
+    return df
+
+
+def _db_guard():
+    return None if settings.database_url else JSONResponse(
+        {"error": "База знаний выключена."}, status_code=503)
+
+
+@app.get("/analytics/dashboard")
+def analytics_dashboard(request: Request, period_months: Optional[int] = None):
+    require_role(request, VIEWERS)
+    if (g := _db_guard()):
+        return g
+    with db.session_scope() as sess:
+        return analytics_mod.dashboard(sess, _period_from(period_months))
+
+
+@app.get("/analytics/suppliers")
+def analytics_suppliers(request: Request, period_months: Optional[int] = None):
+    require_role(request, VIEWERS)
+    if (g := _db_guard()):
+        return g
+    with db.session_scope() as sess:
+        return {"suppliers": analytics_mod.suppliers_overview(sess, _period_from(period_months))}
+
+
+@app.get("/analytics/suppliers/{supplier_id}")
+def analytics_supplier_card(supplier_id: int, request: Request):
+    require_role(request, VIEWERS)
+    if (g := _db_guard()):
+        return g
+    with db.session_scope() as sess:
+        return analytics_mod.supplier_card(sess, supplier_id)
+
+
+@app.get("/analytics/offers")
+def analytics_offers(request: Request, period_months: Optional[int] = None):
+    require_role(request, VIEWERS)
+    if (g := _db_guard()):
+        return g
+    with db.session_scope() as sess:
+        return {"items": analytics_mod.items_analytics(sess, _period_from(period_months))}
+
+
+@app.get("/analytics/item-history")
+def analytics_item_history(canonical: str, request: Request):
+    require_role(request, VIEWERS)
+    if (g := _db_guard()):
+        return g
+    with db.session_scope() as sess:
+        return {"series": analytics_mod.item_history(sess, canonical)}
+
+
+@app.get("/analytics/employees")
+def analytics_employees(request: Request, period_months: Optional[int] = None):
+    # manager/admin — все; procurer — только своя статистика.
+    user = current_user(request)
+    if user["role"] not in ("manager", "admin", "procurer"):
+        raise HTTPException(status_code=403, detail="Недоступно.")
+    if (g := _db_guard()):
+        return g
+    only = user["email"] if user["role"] == "procurer" else None
+    with db.session_scope() as sess:
+        return {"employees": analytics_mod.employees(sess, _period_from(period_months), only_email=only),
+                "self_only": only is not None}
+
+
+@app.get("/search")
+def search_endpoint(request: Request, number: Optional[str] = None, supplier: Optional[str] = None,
+                    product: Optional[str] = None, model: Optional[str] = None,
+                    manufacturer: Optional[str] = None, category: Optional[str] = None,
+                    date_from: Optional[str] = None, date_to: Optional[str] = None,
+                    price_min: Optional[float] = None, price_max: Optional[float] = None,
+                    risk_level: Optional[str] = None, employee: Optional[str] = None):
+    require_role(request, VIEWERS)
+    if (g := _db_guard()):
+        return g
+    from datetime import date as _date
+    df = _date.fromisoformat(date_from) if date_from else None
+    dt = _date.fromisoformat(date_to) if date_to else None
+    with db.session_scope() as sess:
+        return {"results": analytics_mod.search(
+            sess, number=number, supplier=supplier, product=product, model=model,
+            manufacturer=manufacturer, category=category, date_from=df, date_to=dt,
+            price_min=price_min, price_max=price_max, risk_level=risk_level, employee=employee)}
+
+
+@app.get("/audit")
+def audit_endpoint(request: Request, user: Optional[str] = None, action: Optional[str] = None,
+                   date_from: Optional[str] = None, date_to: Optional[str] = None):
+    require_role(request, ("admin",))  # журнал аудита — только admin
+    if (g := _db_guard()):
+        return g
+    from datetime import date as _date
+    df = _date.fromisoformat(date_from) if date_from else None
+    dt = _date.fromisoformat(date_to) if date_to else None
+    with db.session_scope() as sess:
+        return {"records": analytics_mod.audit_query(sess, user=user, action=action,
+                                                     date_from=df, date_to=dt)}
 
 
 # ── Раздача собранного веб-интерфейса (React) ───────────────────────────────
