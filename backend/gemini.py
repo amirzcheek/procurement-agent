@@ -139,40 +139,138 @@ def grounded_search(query: str) -> List[dict]:
         cand = (data.get("candidates") or [{}])[0]
         parts = cand.get("content", {}).get("parts", []) or []
         text = "".join(p.get("text", "") for p in parts)
+        chunks = (cand.get("groundingMetadata") or {}).get("groundingChunks") or []
     except Exception as e:
         log.error("gemini: неожиданный формат ответа: %s", e)
         return []
 
     items = parse_price_items(text, allowed_sources=s.marketplaces)[: s.max_prices_per_item]
-    _resolve_redirects(items)
+    # Ссылки берём из grounding-метаданных (реальные страницы из выдачи Google),
+    # а не из «прямых» URL, которые модель может выдумать.
+    items = _attach_grounding_urls(items, chunks)
+    # Отбрасываем позиции с реально мёртвой ссылкой (404/410) — чтобы не показывать
+    # недействительные ссылки (grounding иногда цитирует устаревшие страницы).
+    items = _drop_dead_links(items)
     log.info("gemini grounded_search: «%s» → %d цен", query, len(items))
     return items
+
+
+_BROWSER_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/126.0 Safari/537.36"
+    ),
+    "Accept": "text/html,application/xhtml+xml",
+}
+
+
+def _drop_dead_links(items: List[dict]) -> List[dict]:
+    """Оставляет только позиции, чья ссылка не отдаёт 404/410. Сомнительные случаи
+    (таймаут/блокировка ботов/иные коды) НЕ отбрасываем — режем только явно мёртвое."""
+    if not items:
+        return items
+    cache: dict = {}
+    alive: List[dict] = []
+    try:
+        with httpx.Client(follow_redirects=True, timeout=12, headers=_BROWSER_HEADERS) as client:
+            for it in items:
+                u = it.get("url") or ""
+                if u not in cache:
+                    cache[u] = _is_alive(client, u)
+                if cache[u]:
+                    alive.append(it)
+                else:
+                    log.info("gemini: отброшена мёртвая ссылка %s", u[:70])
+    except Exception as e:
+        log.warning("проверка ссылок не удалась (%s) — оставляю как есть", e)
+        return items
+    return alive
+
+
+def _is_alive(client: httpx.Client, url: str) -> bool:
+    if not url:
+        return False
+    try:
+        with client.stream("GET", url) as r:  # без загрузки тела
+            return r.status_code not in (404, 410)
+    except Exception:
+        return True  # сеть/таймаут — не блокируем (режем только явные 404/410)
 
 
 _REDIRECT_HOST = "vertexaisearch.cloud.google.com"
 
 
-def _resolve_redirects(items: List[dict]) -> None:
-    """Grounding иногда отдаёт ссылки-редиректы Google. Разворачиваем их в прямой
-    URL магазина и восстанавливаем настоящий домен-источник. Побочный бонус —
-    проверяем, что страница реально существует. Ошибки игнорируем (оставляем как есть).
+def _title_domain(title: Optional[str]) -> str:
+    t = (title or "").strip().lower()
+    return t[4:] if t.startswith("www.") else t
+
+
+def _grounding_pool(chunks: List[dict]) -> List[dict]:
+    """Список реальных источников из grounding: [{url, domain, used}].
+
+    URL из groundingChunks — это ссылки-редиректы Google на реально процитированные
+    страницы. Разворачиваем в прямой URL магазина (если не удалось — редирект всё
+    равно рабочий, ведёт на ту же страницу). Домен берём из title чанка (satu.kz и т.п.).
     """
-    if not any(_REDIRECT_HOST in (it.get("url") or "") for it in items):
-        return
+    if not chunks:
+        return []
+    pool: List[dict] = []
     try:
         with httpx.Client(follow_redirects=True, timeout=15,
                           headers={"User-Agent": "Mozilla/5.0"}) as client:
-            for it in items:
-                url = it.get("url") or ""
-                if _REDIRECT_HOST not in url:
+            for ch in chunks:
+                web = ch.get("web") or {}
+                uri = (web.get("uri") or "").strip()
+                if not uri:
                     continue
-                try:
-                    resp = client.head(url)
-                    final = str(resp.url)
-                    if _REDIRECT_HOST not in final:
-                        it["url"] = final
-                        it["source"] = _domain(final)
-                except Exception as e:  # один битый редирект не должен ронять остальное
-                    log.debug("не развернул редирект %s: %s", url[:60], e)
+                dom = _title_domain(web.get("title"))
+                final = uri
+                if _REDIRECT_HOST in uri:
+                    try:
+                        final = str(client.head(uri).url)
+                    except Exception:
+                        final = uri  # редирект рабочий сам по себе
+                real_dom = _domain(final)
+                if real_dom and _REDIRECT_HOST not in real_dom:
+                    dom = real_dom
+                pool.append({"url": final, "domain": dom, "used": False})
     except Exception as e:
-        log.warning("resolve redirects: %s", e)
+        log.warning("grounding pool: %s", e)
+    return pool
+
+
+def _attach_grounding_urls(items: List[dict], chunks: List[dict]) -> List[dict]:
+    """Присваивает каждой цене реальную ссылку из grounding (по совпадению домена).
+
+    Если grounding-ссылок нет вовсе — оставляем как есть (лучше, чем ничего). Если
+    grounding есть, но конкретной цене реальный источник не нашёлся — эту цену
+    отбрасываем, чтобы не показывать недействительную ссылку.
+    """
+    pool = _grounding_pool(chunks)
+    if not pool:
+        return items
+
+    def take(match_domain: Optional[str]) -> Optional[dict]:
+        for e in pool:
+            if e["used"]:
+                continue
+            if match_domain is None:
+                e["used"] = True
+                return e
+            d = e["domain"] or ""
+            if d and (d in match_domain or match_domain in d):
+                e["used"] = True
+                return e
+        return None
+
+    out: List[dict] = []
+    for it in items:
+        dom = (it.get("source") or _domain(it.get("url") or "")).lower()
+        e = take(dom) or take(None)  # сперва по домену, иначе любой оставшийся реальный
+        if not e:
+            continue  # реального источника не осталось — цену без валидной ссылки не показываем
+        it["url"] = e["url"]
+        if e["domain"]:
+            it["source"] = e["domain"]
+        out.append(it)
+    return out
