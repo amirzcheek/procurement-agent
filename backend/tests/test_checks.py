@@ -64,3 +64,52 @@ def test_quantity_mismatch():
     ms = r["findings"]["mismatches"]
     assert len(ms) == 1 and ms[0]["item"] == "a"
     assert ms[0]["per_source"] == {"договор": 10, "КП": 12}
+
+
+# ── aggregate_risk ───────────────────────────────────────────────────────────
+def _chk(type, risk, result=None, findings=None):
+    return {"type": type, "risk_level": risk, "result": result or {}, "findings": findings or {}}
+
+
+def test_aggregate_all_low():
+    agg = checks.aggregate_risk([_chk("price", "low"), _chk("conditions", "low")])
+    assert agg["risk_level"] == "low"
+    assert agg["factors"] == []
+
+
+def test_aggregate_high_wins():
+    agg = checks.aggregate_risk([_chk("conditions", "medium"), _chk("price", "high")])
+    assert agg["risk_level"] == "high"
+
+
+def test_aggregate_medium():
+    agg = checks.aggregate_risk([_chk("conditions", "medium"), _chk("price", "low")])
+    assert agg["risk_level"] == "medium"
+
+
+def test_factor_overprice():
+    price = _chk("price", "high", result={"items": [
+        {"item": "Бумага", "kp_unit_price": 3000, "combined_min": 1000, "combined_max": 2000, "risk_level": "high"},
+    ]})
+    agg = checks.aggregate_risk([price])
+    facs = [f["factor"] for f in agg["factors"]]
+    assert "завышение цены" in facs
+
+
+def test_factor_underprice():
+    price = _chk("price", "high", result={"items": [
+        {"item": "X", "kp_unit_price": 500, "combined_min": 1000, "combined_max": 2000, "risk_level": "high"},
+    ]})
+    agg = checks.aggregate_risk([price])
+    assert "занижение цены" in [f["factor"] for f in agg["factors"]]
+
+
+def test_factor_conditions_and_quantity():
+    cond = _chk("conditions", "high", findings={"missing_critical": ["гарантия"],
+                                                "missing_extra": ["приложения"]})
+    qty = _chk("quantity", "medium", findings={"mismatches": [{"item": "a", "per_source": {"д": 1, "кп": 2}}]})
+    agg = checks.aggregate_risk([cond, qty])
+    facs = [f["factor"] for f in agg["factors"]]
+    assert "отсутствие обязательных условий" in facs
+    assert "отсутствие обязательных документов" in facs
+    assert "изменение количества" in facs

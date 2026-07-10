@@ -764,6 +764,33 @@ tr.clickable:hover td {
   width: auto;
 }
 
+.conc-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 20px 0 4px;
+}
+.risk-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+.factors,
+.recs {
+  margin: 6px 0 0;
+  padding-left: 20px;
+  font-size: 14px;
+  line-height: 1.7;
+}
+.factors li b {
+  color: var(--text);
+}
+.recs li {
+  color: var(--ink);
+}
+
 /* ── Мобильная адаптация ── */
 @media (max-width: 720px) {
   .summary-cards {

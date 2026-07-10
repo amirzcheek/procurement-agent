@@ -77,6 +77,104 @@ def _add_historical_sheet(wb: Workbook, historical: dict) -> None:
     ws.freeze_panes = "A3"
 
 
+_FACTOR_SEP = "; "
+
+
+def build_conclusion_xlsx(conc: dict) -> bytes:
+    """Заключение по договору → xlsx: листы «Заключение», «Проверки», «История цен»."""
+    wb = Workbook()
+    c = conc.get("contract", {})
+    risk = conc.get("risk_level", "unknown")
+
+    # ── Лист «Заключение» ────────────────────────────────────────────────────
+    ws = wb.active
+    ws.title = "Заключение"
+    rows = [
+        ["ЗАКЛЮЧЕНИЕ ПО ДОГОВОРУ", ""],
+        ["Номер", c.get("number")],
+        ["Дата", c.get("date")],
+        ["Поставщик", c.get("supplier")],
+        ["Заказчик", c.get("customer")],
+        ["Предмет", c.get("subject")],
+        ["Сумма", c.get("total_sum")],
+        ["Источник финансирования", c.get("funding_source")],
+        ["Статус", c.get("status")],
+        ["Период сравнения цен", conc.get("period_label")],
+        ["ИТОГОВЫЙ РИСК", _RISK_RU.get(risk, risk)],
+    ]
+    for r in rows:
+        ws.append(r)
+    ws["A1"].font = Font(bold=True, size=13)
+    ws.cell(row=len(rows), column=2).fill = _RISK_FILL.get(risk, _RISK_FILL["unknown"])
+    ws.cell(row=len(rows), column=1).font = Font(bold=True)
+
+    ws.append([])
+    ws.append(["Факторы риска", ""])
+    ws.cell(row=ws.max_row, column=1).font = Font(bold=True)
+    for f in conc.get("risk_factors", []):
+        detail = f.get("item") or (_FACTOR_SEP.join(f["detail"]) if isinstance(f.get("detail"), list) else f.get("detail") or "")
+        ws.append([f.get("factor"), f"{detail}  [{f.get('source')}]"])
+    ws.append([])
+    ws.append(["Рекомендации", ""])
+    ws.cell(row=ws.max_row, column=1).font = Font(bold=True)
+    for rec in conc.get("recommendations", []):
+        ws.append(["•", rec])
+    ws.append([])
+    ws.append(["ДИСКЛЕЙМЕР", conc.get("disclaimer", "")])
+    ws.column_dimensions["A"].width = 30
+    ws.column_dimensions["B"].width = 80
+    for row in ws.iter_rows(min_col=2, max_col=2):
+        row[0].alignment = Alignment(wrap_text=True, vertical="top")
+
+    # ── Лист «Проверки» ──────────────────────────────────────────────────────
+    ws2 = wb.create_sheet("Проверки")
+    ws2.append(["Проверка", "Риск", "Итог/находки"])
+    for col in range(1, 4):
+        ws2.cell(row=1, column=col).fill = _HEADER_FILL
+        ws2.cell(row=1, column=col).font = _HEADER_FONT
+    _names = {"characteristics": "Характеристики", "price": "Цена",
+              "quantity": "Количество", "conditions": "Обязательные условия"}
+    for chk in conc.get("checks", []):
+        f = chk.get("findings") or {}
+        summary = _friendly_findings(chk.get("type"), f, chk.get("result") or {})
+        ws2.append([_names.get(chk["type"], chk["type"]), _RISK_RU.get(chk["risk_level"], chk["risk_level"]), summary])
+        ws2.cell(row=ws2.max_row, column=2).fill = _RISK_FILL.get(chk["risk_level"], _RISK_FILL["unknown"])
+    ws2.column_dimensions["A"].width = 24
+    ws2.column_dimensions["B"].width = 12
+    ws2.column_dimensions["C"].width = 80
+    for row in ws2.iter_rows(min_col=3, max_col=3):
+        row[0].alignment = Alignment(wrap_text=True, vertical="top")
+
+    # ── Лист «История цен» (за период) ───────────────────────────────────────
+    _add_historical_sheet(wb, {"period_label": conc.get("period_label", ""), "items": conc.get("items", [])})
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def _friendly_findings(ctype: str, f: dict, r: dict) -> str:
+    if ctype == "conditions":
+        parts = []
+        if f.get("missing_critical"):
+            parts.append("нет: " + ", ".join(f["missing_critical"]))
+        if f.get("missing_extra"):
+            parts.append("нет доп.: " + ", ".join(f["missing_extra"]))
+        return "; ".join(parts) or "все условия присутствуют"
+    if ctype == "quantity":
+        ms = f.get("mismatches") or []
+        return r.get("note") or (f"расхождения: {len(ms)}" if ms else "совпадает")
+    if ctype == "characteristics":
+        items = f.get("items") or []
+        if not items:
+            return r.get("note") or "нет данных для сравнения"
+        return "; ".join(f"{it['item']}: {', '.join(it.get('differences') or [])}" for it in items[:5])
+    if ctype == "price":
+        high = f.get("high") or []
+        return f"позиций с высоким риском: {len(high)}" if high else "в пределах диапазона"
+    return ""
+
+
 def build_xlsx(report: AnalysisReport, historical: dict | None = None) -> bytes:
     wb = Workbook()
 

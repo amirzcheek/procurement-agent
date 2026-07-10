@@ -19,13 +19,14 @@ from pathlib import Path
 from typing import Dict, Optional
 from urllib.parse import unquote
 
-from fastapi import FastAPI, Request, UploadFile
+from fastapi import FastAPI, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
 import checks as checks_mod
+import conclusion as conclusion_mod
 import db
 import knowledge
 import pipeline
@@ -102,6 +103,18 @@ def current_user(request: Request) -> dict:
     else:
         role = "procurer"
     return {"displayName": display_name, "email": email, "isAdmin": is_admin, "role": role}
+
+
+def require_role(request: Request, allowed: tuple) -> dict:
+    """Гейтинг по роли. Роль не из списка → 403. Запись/подтверждение — procurer/admin."""
+    user = current_user(request)
+    if user["role"] not in allowed:
+        raise HTTPException(status_code=403,
+                            detail=f"Действие недоступно для роли «{user['role']}».")
+    return user
+
+
+WRITERS = ("procurer", "admin")  # кто может загружать/подтверждать/запускать проверки
 
 
 @app.get("/auth/session")
@@ -221,8 +234,9 @@ class ConfirmRequest(BaseModel):
 
 
 @app.post("/knowledge/extract")
-async def knowledge_extract(file: UploadFile):
+async def knowledge_extract(file: UploadFile, request: Request):
     """Извлечь позиции из договора/КП для подтверждения перед записью в базу знаний."""
+    require_role(request, WRITERS)
     import extract as extract_mod
     import parse_items as parse_mod
 
@@ -243,7 +257,7 @@ async def knowledge_extract(file: UploadFile):
 @app.post("/knowledge/confirm")
 def knowledge_confirm(req: ConfirmRequest, request: Request):
     """Подтверждение и запись договора/КП в базу знаний."""
-    user = current_user(request)
+    user = require_role(request, WRITERS)
     if not settings.database_url:
         return JSONResponse({"error": "База знаний выключена (DATABASE_URL не задан)."}, status_code=503)
     if not req.items:
@@ -297,7 +311,7 @@ def contracts_list():
             out.append({
                 "id": c.id, "number": c.number, "date": _iso(c.date),
                 "supplier": repository.supplier_name(sess, c.supplier_id),
-                "customer": c.customer, "status": c.status,
+                "customer": c.customer, "status": c.status, "risk_level": c.risk_level,
                 "items": len(items), "created_at": _iso(c.created_at),
             })
     return {"enabled": True, "contracts": out}
@@ -317,14 +331,17 @@ def contract_detail(contract_id: int):
             "funding_source": c.funding_source, "warranty": c.warranty,
             "delivery_term": c.delivery_term, "payment_terms": c.payment_terms,
             "conditions": c.conditions, "status": c.status,
+            "risk_level": c.risk_level,
+            "risk_factors": (c.risk_factors or {}).get("factors", []),
             "items": [_line_item_dict(li) for li in repository.get_line_items(sess, contract_id)],
             "checks": [_check_dict(ch) for ch in repository.get_checks(sess, contract_id)],
         }
 
 
 @app.post("/contracts/{contract_id}/check")
-def contract_check(contract_id: int, req: CheckRequest):
-    """Запуск 4 проверок договора → запись в checks → возврат результатов."""
+def contract_check(contract_id: int, req: CheckRequest, request: Request):
+    """Запуск 4 проверок договора → запись в checks + агрегированный риск → возврат."""
+    require_role(request, WRITERS)
     if not settings.database_url:
         return JSONResponse({"error": "База знаний выключена."}, status_code=503)
     try:
@@ -333,10 +350,56 @@ def contract_check(contract_id: int, req: CheckRequest):
             if c is None:
                 return JSONResponse({"error": "Договор не найден."}, status_code=404)
             result = checks_mod.run_all_checks(sess, c, req.period_months)
-        return {"ok": True, "contract_id": contract_id, "checks": result}
+        return {"ok": True, "contract_id": contract_id, **result}
     except Exception as e:
         log.exception("contract_check упал")
         return JSONResponse({"error": f"Ошибка проверки: {_friendly_error(e)}"}, status_code=500)
+
+
+@app.post("/contracts/{contract_id}/confirm")
+def contract_confirm(contract_id: int, request: Request):
+    """Подтверждение заключения закупщиком: статус draft → checked, запись в audit_log."""
+    user = require_role(request, WRITERS)
+    if not settings.database_url:
+        return JSONResponse({"error": "База знаний выключена."}, status_code=503)
+    with db.session_scope() as sess:
+        c = repository.get_contract(sess, contract_id)
+        if c is None:
+            return JSONResponse({"error": "Договор не найден."}, status_code=404)
+        c.status = "checked"
+        repository.audit(sess, user["email"] or None, "confirm_contract", "contract", contract_id,
+                         {"risk_level": c.risk_level})
+    return {"ok": True, "status": "checked"}
+
+
+@app.get("/contracts/{contract_id}/conclusion")
+def contract_conclusion(contract_id: int, period_months: Optional[int] = None):
+    """Полное заключение по договору за выбранный период (пересчёт при смене периода)."""
+    if not settings.database_url:
+        return JSONResponse({"error": "База знаний выключена."}, status_code=503)
+    with db.session_scope() as sess:
+        c = repository.get_contract(sess, contract_id)
+        if c is None:
+            return JSONResponse({"error": "Договор не найден."}, status_code=404)
+        return conclusion_mod.build_conclusion(sess, c, period_months)
+
+
+@app.get("/contracts/{contract_id}/export")
+def contract_export(contract_id: int, period_months: Optional[int] = None):
+    """Заключение по договору в xlsx (листы «Заключение», «Проверки», «История цен»)."""
+    if not settings.database_url:
+        return JSONResponse({"error": "База знаний выключена."}, status_code=503)
+    with db.session_scope() as sess:
+        c = repository.get_contract(sess, contract_id)
+        if c is None:
+            return JSONResponse({"error": "Договор не найден."}, status_code=404)
+        conc = conclusion_mod.build_conclusion(sess, c, period_months)
+    data = report_mod.build_conclusion_xlsx(conc)
+    return Response(
+        content=data,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="contract_{contract_id}.xlsx"'},
+    )
 
 
 # ── Раздача собранного веб-интерфейса (React) ───────────────────────────────

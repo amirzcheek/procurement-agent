@@ -1,10 +1,13 @@
 import React, { useState } from 'react'
 import { knowledgeExtract, knowledgeConfirm } from '../api.js'
 import { useI18n } from '../i18n.jsx'
+import { useSession } from '../auth/useSession.js'
 
 // База знаний: загрузить договор/КП → извлечь позиции → подтвердить реквизиты → сохранить.
 export default function KnowledgeView({ dbEnabled }) {
   const { t, locale } = useI18n()
+  const { user } = useSession()
+  const canWrite = ['procurer', 'admin'].includes(user.role)
   const [file, setFile] = useState(null)
   const [items, setItems] = useState([])
   const [header, setHeader] = useState({
@@ -50,13 +53,14 @@ export default function KnowledgeView({ dbEnabled }) {
       <p className="page-subtitle">{t('kb_desc')}</p>
 
       {!dbEnabled && <div className="notice">{t('hist_disabled')}</div>}
+      {dbEnabled && !canWrite && <div className="notice">{t('manager_readonly')}</div>}
 
       <section className="card controls">
         <label className="file-input">
           <input
             type="file"
             accept=".xlsx,.xlsm,.pdf"
-            disabled={status === 'extracting' || !dbEnabled}
+            disabled={status === 'extracting' || !dbEnabled || !canWrite}
             onChange={(e) => {
               setFile(e.target.files?.[0] || null)
               setItems([])
@@ -65,7 +69,7 @@ export default function KnowledgeView({ dbEnabled }) {
           />
           <span>{file ? file.name : t('kb_pick')}</span>
         </label>
-        <button className="btn btn-primary" onClick={onExtract} disabled={!file || !dbEnabled || status === 'extracting'}>
+        <button className="btn btn-primary" onClick={onExtract} disabled={!file || !dbEnabled || !canWrite || status === 'extracting'}>
           {status === 'extracting' ? t('kb_extracting') : t('kb_extract')}
         </button>
       </section>

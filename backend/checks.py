@@ -179,9 +179,57 @@ def _check_price(sess, line_items, period_months: Optional[int]) -> dict:
     }
 
 
+# ── Агрегированный риск договора (раздел 7 ТЗ) — чистая логика ────────────────
+def aggregate_risk(checks: List[dict]) -> dict:
+    """Итоговый риск договора + факторы (из findings всех проверок).
+    Правило: любой high → high; иначе любой medium → medium; иначе low."""
+    level = _worst([c["risk_level"] for c in checks])
+    factors: List[dict] = []
+    by_type = {c["type"]: c for c in checks}
+
+    price = by_type.get("price", {})
+    for it in (price.get("result", {}).get("items") or []):
+        if it.get("risk_level") != "high":
+            continue
+        kp, mn, mx = it.get("kp_unit_price"), it.get("combined_min"), it.get("combined_max")
+        if kp is not None and mx is not None and kp > mx:
+            factor = "завышение цены"
+        elif kp is not None and mn is not None and kp < mn:
+            factor = "занижение цены"
+        else:
+            factor = "ценовое отклонение"
+        factors.append({"factor": factor, "source": "price", "item": it.get("item")})
+
+    chars = by_type.get("characteristics", {})
+    for it in (chars.get("findings", {}).get("items") or []):
+        if it.get("significant"):
+            factors.append({"factor": "изменение характеристик", "source": "characteristics",
+                            "item": it.get("item"), "detail": it.get("differences")})
+
+    qty = by_type.get("quantity", {})
+    ms = qty.get("findings", {}).get("mismatches") or []
+    for m in ms:
+        factors.append({"factor": "изменение количества", "source": "quantity", "item": m.get("item")})
+    if ms:
+        factors.append({"factor": "несоответствие КП/спецификации", "source": "quantity"})
+
+    cond = by_type.get("conditions", {})
+    cf = cond.get("findings", {})
+    if cf.get("missing_critical"):
+        factors.append({"factor": "отсутствие обязательных условий", "source": "conditions",
+                        "detail": cf["missing_critical"]})
+    docs = [x for x in (cf.get("missing_extra") or []) if x in ("приложения", "техническая спецификация")]
+    if docs:
+        factors.append({"factor": "отсутствие обязательных документов", "source": "conditions",
+                        "detail": docs})
+
+    return {"risk_level": level, "factors": factors}
+
+
 # ── Оркестрация ──────────────────────────────────────────────────────────────
-def run_all_checks(sess, contract, period_months: Optional[int]) -> List[dict]:
-    """Выполняет 4 проверки договора, перезаписывает записи в checks, возвращает их."""
+def run_all_checks(sess, contract, period_months: Optional[int]) -> dict:
+    """Выполняет 4 проверки, считает агрегированный риск, пишет в checks и contracts.
+    Возвращает {checks, risk_level, risk_factors}."""
     line_items = repository.get_line_items(sess, contract.id)
 
     checks = [
@@ -201,11 +249,17 @@ def run_all_checks(sess, contract, period_months: Optional[int]) -> List[dict]:
         repository.save_check(sess, contract_id=contract.id, type=c["type"],
                               result=c["result"], risk_level=c["risk_level"],
                               findings=c["findings"])
+
+    agg = aggregate_risk(checks)
+    contract.risk_level = agg["risk_level"]
+    contract.risk_factors = {"factors": agg["factors"]}
+
     repository.audit(sess, None, "run_checks", "contract", contract.id,
-                     {"risks": {c["type"]: c["risk_level"] for c in checks}})
-    log.info("проверки договора #%s: %s", contract.id,
+                     {"risk_level": agg["risk_level"],
+                      "risks": {c["type"]: c["risk_level"] for c in checks}})
+    log.info("проверки договора #%s: итог=%s %s", contract.id, agg["risk_level"],
              {c["type"]: c["risk_level"] for c in checks})
-    return checks
+    return {"checks": checks, "risk_level": agg["risk_level"], "risk_factors": agg["factors"]}
 
 
 def _quantity_groups(line_items) -> List[dict]:

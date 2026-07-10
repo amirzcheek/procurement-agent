@@ -128,6 +128,17 @@ export const i18n = {
     chk_one_source: 'Сверка невозможна: один источник документов',
     chk_high_items: 'Позиции с высоким риском',
     chk_differences: 'Отличия',
+    // Заключение и риск
+    contract_risk: 'Итоговый риск',
+    conclusion_title: 'Заключение по договору',
+    risk_factors_title: 'Факторы риска',
+    recommendations_title: 'Рекомендации',
+    confirm_contract: 'Подтвердить (Проверено)',
+    confirming: 'Подтверждение…',
+    confirmed_ok: 'Договор подтверждён ✓',
+    export_conclusion: '⬇ Скачать заключение (xlsx)',
+    manager_readonly: 'Роль «manager» — только просмотр, без загрузки и подтверждения.',
+    disclaimer_short: 'Помощник закупщика, не окончательное решение.',
   },
 
   kk: {
@@ -247,6 +258,16 @@ export const i18n = {
     chk_one_source: 'Салыстыру мүмкін емес: бір дереккөз',
     chk_high_items: 'Жоғары тәуекелді позициялар',
     chk_differences: 'Айырмашылықтар',
+    contract_risk: 'Жиынтық тәуекел',
+    conclusion_title: 'Шарт бойынша қорытынды',
+    risk_factors_title: 'Тәуекел факторлары',
+    recommendations_title: 'Ұсыныстар',
+    confirm_contract: 'Растау (Тексерілді)',
+    confirming: 'Растау…',
+    confirmed_ok: 'Шарт расталды ✓',
+    export_conclusion: '⬇ Қорытындыны жүктеу (xlsx)',
+    manager_readonly: '«manager» рөлі — тек қарау, жүктеу мен растаусыз.',
+    disclaimer_short: 'Сатып алушының көмекшісі, түпкілікті шешім емес.',
   },
 
   en: {
@@ -366,6 +387,16 @@ export const i18n = {
     chk_one_source: 'Cannot cross-check: single document source',
     chk_high_items: 'High-risk items',
     chk_differences: 'Differences',
+    contract_risk: 'Overall risk',
+    conclusion_title: 'Contract conclusion',
+    risk_factors_title: 'Risk factors',
+    recommendations_title: 'Recommendations',
+    confirm_contract: 'Confirm (Checked)',
+    confirming: 'Confirming…',
+    confirmed_ok: 'Contract confirmed ✓',
+    export_conclusion: '⬇ Download conclusion (xlsx)',
+    manager_readonly: 'Role “manager” — view only, no upload or confirmation.',
+    disclaimer_short: 'An assistant for the buyer, not a final decision.',
   },
 }
 

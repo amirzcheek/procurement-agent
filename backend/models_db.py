@@ -61,6 +61,9 @@ class Contract(Base):
     payment_terms: Mapped[Optional[str]] = mapped_column(String(500))
     # Доп. обязательные условия (Этап 2): penalties/appendices/tech_spec и пр. флаги/тексты.
     conditions: Mapped[Optional[dict]] = mapped_column(JSONB)
+    # Агрегированный риск договора (Этап 2, часть 2) — считается при запуске проверок.
+    risk_level: Mapped[Optional[str]] = mapped_column(String(10))  # low|medium|high
+    risk_factors: Mapped[Optional[dict]] = mapped_column(JSONB)
     status: Mapped[str] = mapped_column(String(20), default="draft")  # draft|checked
     created_by: Mapped[Optional[str]] = mapped_column(String(255))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

@@ -80,6 +80,29 @@ export async function runContractCheck(id, periodMonths) {
   return data
 }
 
+export async function getConclusion(id, period) {
+  const p = new URLSearchParams()
+  if (period?.months != null) p.set('period_months', String(period.months))
+  const r = await fetch(`${API_BASE}/contracts/${id}/conclusion?${p.toString()}`)
+  const data = await r.json().catch(() => ({}))
+  if (!r.ok) throw new Error(data.error || `conclusion ${r.status}`)
+  return data
+}
+
+export async function confirmContract(id) {
+  const r = await fetch(`${API_BASE}/contracts/${id}/confirm`, { method: 'POST' })
+  const data = await r.json().catch(() => ({}))
+  if (!r.ok) throw new Error(data.error || `confirm ${r.status}`)
+  return data
+}
+
+export function conclusionExportUrl(id, period) {
+  const p = new URLSearchParams()
+  if (period?.months != null) p.set('period_months', String(period.months))
+  const qs = p.toString()
+  return `${API_BASE}/contracts/${id}/export${qs ? '?' + qs : ''}`
+}
+
 /**
  * POST /analyze c multipart-файлом. Ответ — SSE-поток.
  * Парсим поток вручную (EventSource не умеет POST) и зовём onEvent(obj) на каждое событие.
