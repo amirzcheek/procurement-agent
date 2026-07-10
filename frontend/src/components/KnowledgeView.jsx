@@ -7,7 +7,11 @@ export default function KnowledgeView({ dbEnabled }) {
   const { t, locale } = useI18n()
   const [file, setFile] = useState(null)
   const [items, setItems] = useState([])
-  const [header, setHeader] = useState({ number: '', date: '', supplier: '', customer: '', funding_source: '' })
+  const [header, setHeader] = useState({
+    number: '', date: '', supplier: '', customer: '', funding_source: '',
+    warranty: '', delivery_term: '', payment_terms: '',
+  })
+  const [cond, setCond] = useState({ penalties: false, appendices: false, tech_spec: false })
   const [status, setStatus] = useState('idle') // idle | extracting | ready | saving | saved | error
   const [error, setError] = useState(null)
 
@@ -30,7 +34,7 @@ export default function KnowledgeView({ dbEnabled }) {
     setStatus('saving')
     setError(null)
     try {
-      await knowledgeConfirm(header, items)
+      await knowledgeConfirm({ ...header, conditions: cond }, items)
       setStatus('saved')
     } catch (e) {
       setError(String(e.message || e))
@@ -96,6 +100,26 @@ export default function KnowledgeView({ dbEnabled }) {
                 <span className="field__label">{t('kb_funding')}</span>
                 <input value={header.funding_source} onChange={(e) => setHeader({ ...header, funding_source: e.target.value })} />
               </label>
+              <label className="field">
+                <span className="field__label">{t('kb_warranty')}</span>
+                <input value={header.warranty} onChange={(e) => setHeader({ ...header, warranty: e.target.value })} />
+              </label>
+              <label className="field">
+                <span className="field__label">{t('kb_delivery')}</span>
+                <input value={header.delivery_term} onChange={(e) => setHeader({ ...header, delivery_term: e.target.value })} />
+              </label>
+              <label className="field">
+                <span className="field__label">{t('kb_payment')}</span>
+                <input value={header.payment_terms} onChange={(e) => setHeader({ ...header, payment_terms: e.target.value })} />
+              </label>
+            </div>
+            <div className="cond-checks">
+              {['penalties', 'appendices', 'tech_spec'].map((k) => (
+                <label key={k} className="cond-check">
+                  <input type="checkbox" checked={cond[k]} onChange={(e) => setCond({ ...cond, [k]: e.target.checked })} />
+                  {t('kb_' + k)}
+                </label>
+              ))}
             </div>
             <button className="btn btn-primary" style={{ marginTop: 16 }} onClick={onSave} disabled={status === 'saving'}>
               {status === 'saving' ? t('kb_saving') : t('kb_save')}

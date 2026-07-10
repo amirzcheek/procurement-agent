@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 from logging_conf import get_logger
 from models_db import (
     AuditLog,
+    Check,
     Contract,
     LineItem,
     PriceHistory,
@@ -125,6 +126,7 @@ def save_contract(sess: Session, *, header: dict, items: List[dict],
         delivery_term=header.get("delivery_term"),
         warranty=header.get("warranty"),
         payment_terms=header.get("payment_terms"),
+        conditions=header.get("conditions"),
         status="checked",
         created_by=created_by,
     )
@@ -198,6 +200,81 @@ def find_internal_observations(sess: Session, *, canonical: str, model: Optional
     out = [PriceObservation(unit_price=float(r.unit_price), obs_date=r.purchase_date,
                             source="внутренняя", unit=r.unit) for r in rows]
     return out
+
+
+# ── Договоры / позиции / проверки (Этап 2) ──────────────────────────────────
+def list_contracts(sess: Session, limit: int = 200) -> List[Contract]:
+    q = select(Contract).order_by(Contract.created_at.desc()).limit(limit)
+    return list(sess.scalars(q).all())
+
+
+def get_contract(sess: Session, contract_id: int) -> Optional[Contract]:
+    return sess.get(Contract, contract_id)
+
+
+def get_line_items(sess: Session, contract_id: int) -> List[LineItem]:
+    q = select(LineItem).where(LineItem.contract_id == contract_id).order_by(LineItem.id)
+    return list(sess.scalars(q).all())
+
+
+def supplier_name(sess: Session, supplier_id: Optional[int]) -> Optional[str]:
+    if not supplier_id:
+        return None
+    sup = sess.get(Supplier, supplier_id)
+    return sup.name if sup else None
+
+
+def find_analog_line_item(sess: Session, li: LineItem) -> Optional[LineItem]:
+    """Лучший исторический аналог позиции (для сравнения характеристик).
+    Точное совпадение (ntin ИЛИ manufacturer+model) → иначе семантика pgvector.
+    Исключает саму позицию и её договор."""
+    # 1) точное
+    exact = []
+    if li.ntin:
+        exact.append(LineItem.ntin == li.ntin)
+    if li.model and li.manufacturer:
+        exact.append((LineItem.model.ilike(li.model)) & (LineItem.manufacturer.ilike(li.manufacturer)))
+    if li.canonical_name:
+        exact.append(LineItem.canonical_name == li.canonical_name)
+    if exact:
+        q = (select(LineItem)
+             .where(or_(*exact), LineItem.id != li.id,
+                    LineItem.contract_id != li.contract_id)
+             .order_by(LineItem.purchase_date.desc().nullslast())
+             .limit(1))
+        found = sess.scalars(q).first()
+        if found:
+            return found
+    # 2) семантика
+    if li.embedding is not None:
+        q = (select(LineItem)
+             .where(LineItem.embedding.isnot(None), LineItem.id != li.id,
+                    LineItem.contract_id != li.contract_id,
+                    LineItem.embedding.cosine_distance(li.embedding) < _COSINE_MAX_DISTANCE)
+             .order_by(LineItem.embedding.cosine_distance(li.embedding))
+             .limit(1))
+        return sess.scalars(q).first()
+    return None
+
+
+def save_check(sess: Session, *, contract_id: int, type: str, result: dict,
+               risk_level: str, findings: dict) -> Check:
+    chk = Check(contract_id=contract_id, type=type, result=result,
+                risk_level=risk_level, findings=findings)
+    sess.add(chk)
+    sess.flush()
+    return chk
+
+
+def replace_checks(sess: Session, contract_id: int) -> None:
+    """Удаляет прежние проверки договора перед перезапуском (идемпотентность)."""
+    for chk in sess.scalars(select(Check).where(Check.contract_id == contract_id)).all():
+        sess.delete(chk)
+
+
+def get_checks(sess: Session, contract_id: int) -> List[Check]:
+    q = select(Check).where(Check.contract_id == contract_id).order_by(Check.type)
+    return list(sess.scalars(q).all())
 
 
 def find_web_observations(sess: Session, *, canonical: str, embedding: Optional[List[float]],

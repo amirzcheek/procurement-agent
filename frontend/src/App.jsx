@@ -7,6 +7,7 @@ import ItemsTable from './components/ItemsTable.jsx'
 import PeriodSelector from './components/PeriodSelector.jsx'
 import HistoricalPanel from './components/HistoricalPanel.jsx'
 import KnowledgeView from './components/KnowledgeView.jsx'
+import ContractsView from './components/ContractsView.jsx'
 
 export default function App() {
   const { t } = useI18n()
@@ -107,12 +108,17 @@ export default function App() {
           <button className={'tab' + (tab === 'knowledge' ? ' active' : '')} onClick={() => setTab('knowledge')}>
             {t('tab_knowledge')}
           </button>
+          <button className={'tab' + (tab === 'contracts' ? ' active' : '')} onClick={() => setTab('contracts')}>
+            {t('tab_contracts')}
+          </button>
         </nav>
 
         <div className="disclaimer" role="note">⚠️ {t('disclaimer')}</div>
 
         {tab === 'knowledge' ? (
           <KnowledgeView dbEnabled={dbEnabled} />
+        ) : tab === 'contracts' ? (
+          <ContractsView dbEnabled={dbEnabled} />
         ) : (
           <>
             <h2 className="page-title">{t('agent_name')}</h2>

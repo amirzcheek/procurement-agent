@@ -78,14 +78,18 @@ def _process_item(item: Item) -> Tuple[ItemReport, ItemContext]:
     """Полный цикл по одной позиции. Не бросает исключений наружу.
     Возвращает отчёт + серверный контекст для исторического анализа."""
     stage_log: List[str] = []
-    canonical = repository.canonical_key(item.name, None, None, item.ntin)
+    canonical = repository.canonical_key(item.name, item.model, item.manufacturer, item.ntin)
     ctx = ItemContext(name=item.name, canonical_key=canonical, canonical_name=item.name,
-                      ntin=item.ntin, kp_unit_price=compare._kp_unit_price(item))
+                      ntin=item.ntin, kp_unit_price=compare._kp_unit_price(item),
+                      model=item.model, manufacturer=item.manufacturer)
     try:
         # 3) нормализация
         query = normalize_item(item)
         ctx.canonical_name = query.query
-        ctx.canonical_key = canonical = repository.canonical_key(query.query, None, None, item.ntin)
+        # canonical_key приоритетно по manufacturer+model (если LLM их выделил),
+        # иначе по нормализованному запросу.
+        ctx.canonical_key = canonical = repository.canonical_key(
+            query.query, item.model, item.manufacturer, item.ntin)
         stage_log.append(f"запрос: «{query.query}» (множитель x{query.pack_multiplier:g})")
 
         # эмбеддинг канонического имени (для семантического поиска аналогов)

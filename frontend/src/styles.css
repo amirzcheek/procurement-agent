@@ -693,6 +693,77 @@ input[type='date'] {
   }
 }
 
+/* ── Договоры и проверки (Этап 2) ── */
+.back-link {
+  display: inline-block;
+  margin: 8px 0;
+  font-size: 14px;
+  font-weight: 600;
+  background: none;
+  border: none;
+  color: var(--accent);
+  cursor: pointer;
+  padding: 0;
+}
+tr.clickable {
+  cursor: pointer;
+}
+tr.clickable:hover td {
+  background: var(--accent-soft);
+}
+
+.checks-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+@media (max-width: 860px) {
+  .checks-grid {
+    grid-template-columns: 1fr;
+  }
+}
+.check-block {
+  padding: 16px 18px;
+}
+.check-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+.check-body {
+  font-size: 13px;
+}
+.finding {
+  margin-top: 6px;
+  padding: 6px 10px;
+  background: rgba(0, 0, 0, 0.03);
+  border-radius: 8px;
+  line-height: 1.5;
+}
+.finding.err {
+  color: var(--red);
+  background: var(--red-bg);
+}
+
+.cond-checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-top: 14px;
+}
+.cond-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--sub);
+  cursor: pointer;
+}
+.cond-check input {
+  width: auto;
+}
+
 /* ── Мобильная адаптация ── */
 @media (max-width: 720px) {
   .summary-cards {

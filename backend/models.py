@@ -12,6 +12,10 @@ from pydantic import BaseModel, Field
 # ── Этап 2: извлечённая позиция КП ───────────────────────────────────────────
 class Item(BaseModel):
     name: str
+    model: Optional[str] = None          # артикул/серия производителя (PC16250, S3221QSA…)
+    manufacturer: Optional[str] = None   # бренд/производитель (Dell, HP…)
+    category: Optional[str] = None       # категория товара (ноутбук, монитор, бумага…)
+    specs: Optional[dict] = None         # ключевые характеристики (JSON: процессор, объём…)
     qty: Optional[float] = None
     unit: Optional[str] = None
     unit_price: Optional[float] = None
@@ -20,6 +24,24 @@ class Item(BaseModel):
 
 
 # ── Этап 3: нормализация под поиск ───────────────────────────────────────────
+class ItemAttrs(BaseModel):
+    """Атрибуты товара, до-извлекаемые из наименования (бэкофилл)."""
+
+    model: Optional[str] = None
+    manufacturer: Optional[str] = None
+    category: Optional[str] = None
+    specs: Optional[dict] = None
+
+
+class SpecCompare(BaseModel):
+    """Результат смыслового сравнения характеристик товара с историческим аналогом (LLM)."""
+
+    differs: bool = False
+    significant: bool = False
+    differences: List[str] = Field(default_factory=list)
+    reason: str = ""
+
+
 class NormalizedQuery(BaseModel):
     """Короткий поисковый запрос + множитель приведения к единице КП.
 

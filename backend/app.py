@@ -25,9 +25,12 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
+import checks as checks_mod
+import db
 import knowledge
 import pipeline
 import report as report_mod
+import repository
 from config import get_settings
 from logging_conf import get_logger
 from models import AnalysisReport
@@ -257,6 +260,83 @@ def knowledge_confirm(req: ConfirmRequest, request: Request):
 def analysis_historical(req: HistoricalRequest):
     """Исторический ценовой анализ по job за выбранный период (пересчёт при смене периода)."""
     return knowledge.historical_for_job(req.job_id, req.period_months, req.date_from, req.date_to)
+
+
+# ── Договоры и проверки (Этап 2) ────────────────────────────────────────────
+class CheckRequest(BaseModel):
+    period_months: Optional[int] = None
+
+
+def _iso(dt) -> Optional[str]:
+    return dt.isoformat() if dt else None
+
+
+def _line_item_dict(li) -> dict:
+    return {
+        "id": li.id, "name": li.name, "model": li.model, "manufacturer": li.manufacturer,
+        "category": li.category, "specs": li.specs,
+        "qty": float(li.qty) if li.qty is not None else None, "unit": li.unit,
+        "unit_price": float(li.unit_price) if li.unit_price is not None else None,
+        "ntin": li.ntin,
+    }
+
+
+def _check_dict(c) -> dict:
+    return {"type": c.type, "risk_level": c.risk_level, "result": c.result,
+            "findings": c.findings, "created_at": _iso(c.created_at)}
+
+
+@app.get("/contracts")
+def contracts_list():
+    if not settings.database_url:
+        return {"enabled": False, "contracts": []}
+    out = []
+    with db.session_scope() as sess:
+        for c in repository.list_contracts(sess):
+            items = repository.get_line_items(sess, c.id)
+            out.append({
+                "id": c.id, "number": c.number, "date": _iso(c.date),
+                "supplier": repository.supplier_name(sess, c.supplier_id),
+                "customer": c.customer, "status": c.status,
+                "items": len(items), "created_at": _iso(c.created_at),
+            })
+    return {"enabled": True, "contracts": out}
+
+
+@app.get("/contracts/{contract_id}")
+def contract_detail(contract_id: int):
+    if not settings.database_url:
+        return JSONResponse({"error": "База знаний выключена."}, status_code=503)
+    with db.session_scope() as sess:
+        c = repository.get_contract(sess, contract_id)
+        if c is None:
+            return JSONResponse({"error": "Договор не найден."}, status_code=404)
+        return {
+            "id": c.id, "number": c.number, "date": _iso(c.date),
+            "supplier": repository.supplier_name(sess, c.supplier_id), "customer": c.customer,
+            "funding_source": c.funding_source, "warranty": c.warranty,
+            "delivery_term": c.delivery_term, "payment_terms": c.payment_terms,
+            "conditions": c.conditions, "status": c.status,
+            "items": [_line_item_dict(li) for li in repository.get_line_items(sess, contract_id)],
+            "checks": [_check_dict(ch) for ch in repository.get_checks(sess, contract_id)],
+        }
+
+
+@app.post("/contracts/{contract_id}/check")
+def contract_check(contract_id: int, req: CheckRequest):
+    """Запуск 4 проверок договора → запись в checks → возврат результатов."""
+    if not settings.database_url:
+        return JSONResponse({"error": "База знаний выключена."}, status_code=503)
+    try:
+        with db.session_scope() as sess:
+            c = repository.get_contract(sess, contract_id)
+            if c is None:
+                return JSONResponse({"error": "Договор не найден."}, status_code=404)
+            result = checks_mod.run_all_checks(sess, c, req.period_months)
+        return {"ok": True, "contract_id": contract_id, "checks": result}
+    except Exception as e:
+        log.exception("contract_check упал")
+        return JSONResponse({"error": f"Ошибка проверки: {_friendly_error(e)}"}, status_code=500)
 
 
 # ── Раздача собранного веб-интерфейса (React) ───────────────────────────────
