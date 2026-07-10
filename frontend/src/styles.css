@@ -475,6 +475,190 @@ td.name {
   font-size: 12px;
 }
 
+/* ── Роль в навбаре ── */
+.role-badge {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--accent);
+  background: var(--accent-soft);
+  padding: 3px 8px;
+  border-radius: 999px;
+}
+
+/* ── Вкладки ── */
+.tabs {
+  display: flex;
+  gap: 6px;
+  border-bottom: 1px solid var(--line);
+  margin: 8px 0 18px;
+}
+.tab {
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--sub);
+  padding: 10px 14px;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+.tab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+.section-title {
+  font-size: 15px;
+  font-weight: 700;
+  margin: 22px 0 10px;
+}
+
+/* ── Период ── */
+.hist-block {
+  margin-top: 22px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--line);
+}
+.period {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin: 14px 0;
+}
+.period-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--sub);
+}
+.period-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.chip {
+  border: 1px solid var(--line);
+  background: #fff;
+  font: inherit;
+  font-size: 13px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  cursor: pointer;
+  color: var(--sub);
+}
+.chip.active {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+.period-range {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+.period-range label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--sub);
+}
+.period-range input {
+  width: auto;
+  padding: 6px 8px;
+}
+
+/* ── Исторический анализ ── */
+.hist .reco {
+  font-size: 12px;
+  color: var(--sub);
+  max-width: 320px;
+}
+.trend {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.spark {
+  color: var(--accent);
+  opacity: 0.75;
+}
+.trend-tag {
+  font-size: 12px;
+  white-space: nowrap;
+}
+.trend-tag.red {
+  color: var(--red);
+  font-weight: 700;
+}
+.trend-tag.green {
+  color: var(--green);
+}
+
+/* ── Уведомления ── */
+.notice {
+  margin: 14px 0;
+  padding: 12px 16px;
+  background: var(--accent-soft);
+  border: 1px solid rgba(37, 99, 235, 0.18);
+  border-radius: var(--r);
+  font-size: 14px;
+  color: var(--sub);
+}
+.notice.ok {
+  background: var(--green-bg);
+  border-color: #bfe6ca;
+  color: var(--green);
+  font-weight: 600;
+}
+
+/* ── Форма реквизитов (база знаний) ── */
+.grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.field {
+  display: block;
+}
+.field__label {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 4px;
+  color: var(--sub);
+}
+input,
+select,
+textarea {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  font-size: 14px;
+  font-family: inherit;
+  background: #fff;
+  color: var(--text);
+}
+input:focus,
+select:focus,
+textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+input[type='date'] {
+  font-family: inherit;
+}
+@media (max-width: 640px) {
+  .grid-2 {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* ── Мобильная адаптация ── */
 @media (max-width: 720px) {
   .summary-cards {

@@ -8,8 +8,51 @@ export async function fetchConfig() {
   return r.json()
 }
 
-export function exportUrl(jobId) {
-  return `${API_BASE}/export/${jobId}`
+export function exportUrl(jobId, period) {
+  const p = new URLSearchParams()
+  if (period?.months != null) p.set('period_months', String(period.months))
+  if (period?.dateFrom) p.set('date_from', period.dateFrom)
+  if (period?.dateTo) p.set('date_to', period.dateTo)
+  const qs = p.toString()
+  return `${API_BASE}/export/${jobId}${qs ? '?' + qs : ''}`
+}
+
+// Исторический ценовой анализ по job за выбранный период (пересчёт при смене периода).
+export async function historicalAnalysis(jobId, period) {
+  const r = await fetch(`${API_BASE}/analysis/historical`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      job_id: jobId,
+      period_months: period?.months ?? null,
+      date_from: period?.dateFrom ?? null,
+      date_to: period?.dateTo ?? null,
+    }),
+  })
+  if (!r.ok) throw new Error(`historical ${r.status}`)
+  return r.json()
+}
+
+// База знаний: извлечь позиции из договора/КП для подтверждения.
+export async function knowledgeExtract(file) {
+  const form = new FormData()
+  form.append('file', file)
+  const r = await fetch(`${API_BASE}/knowledge/extract`, { method: 'POST', body: form })
+  const data = await r.json().catch(() => ({}))
+  if (!r.ok) throw new Error(data.error || `extract ${r.status}`)
+  return data
+}
+
+// База знаний: сохранить подтверждённый договор/КП.
+export async function knowledgeConfirm(header, items) {
+  const r = await fetch(`${API_BASE}/knowledge/confirm`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ header, items }),
+  })
+  const data = await r.json().catch(() => ({}))
+  if (!r.ok) throw new Error(data.error || `confirm ${r.status}`)
+  return data
 }
 
 /**

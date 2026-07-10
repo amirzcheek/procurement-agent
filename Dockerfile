@@ -47,6 +47,7 @@ ENV FRONTEND_DIST=/app/static
 
 EXPOSE 8080
 
-# Наружу порт пробрасывается только во внутреннюю сеть (см. docker-compose.yml);
-# доступ снаружи — через nginx/Caddy основного домена под /agents/procurement/.
-CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8080"]
+# Точка входа: применяет миграции БД знаний (если DATABASE_URL задан), затем uvicorn.
+# Наружу порт — только во внутреннюю сеть; доступ снаружи через nginx/Caddy под слагом.
+RUN chmod +x /app/entrypoint.sh
+ENTRYPOINT ["/app/entrypoint.sh"]

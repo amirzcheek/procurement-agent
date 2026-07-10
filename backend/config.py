@@ -40,6 +40,17 @@ class Settings(BaseSettings):
     # Матчинг
     match_confidence_min: float = Field(default=0.6)
 
+    # ── База знаний закупок (Этап 1) ──
+    # PostgreSQL 16 + pgvector. Пусто — БД-функции выключены (агент работает как раньше,
+    # только рыночный поиск), чтобы локальная разработка не требовала поднятой БД.
+    database_url: str = Field(default="")
+    # Эмбеддинги для семантического поиска аналогов (Ollama, snowflake-arctic-embed2, 1024d).
+    embedding_url: str = Field(default="http://10.99.99.202:11434/api/embeddings")
+    embedding_model: str = Field(default="snowflake-arctic-embed2")
+    embedding_dim: int = Field(default=1024)
+    # Период сравнения цен по умолчанию (мес). Переопределяется в UI на каждый анализ.
+    default_price_period_months: int = Field(default=6)
+
     # ── Деплой на портал ai.knus.edu.kz (под слаг /agents/procurement) ──
     # Префикс под-пути на портале. Нужен FastAPI для корректных URL за reverse-proxy.
     # Локально — пусто. Читается из ROOT_PATH (совместимо с другими агентами вуза).
@@ -52,7 +63,13 @@ class Settings(BaseSettings):
     auth_user_headers: str = Field(
         default="x-user-name,remote-name,x-forwarded-user,remote-user,x-auth-user"
     )
+    auth_email_headers: str = Field(
+        default="x-user-email,x-forwarded-email,remote-email,x-auth-email"
+    )
     auth_admin_header: str = Field(default="x-is-admin")
+    # Роли: procurer (по умолчанию) | manager | admin. Списки email — через запятую.
+    admin_emails: Annotated[List[str], NoDecode] = Field(default=[])
+    manager_emails: Annotated[List[str], NoDecode] = Field(default=[])
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -61,7 +78,7 @@ class Settings(BaseSettings):
         case_sensitive=False,
     )
 
-    @field_validator("marketplaces", "cors_origins", mode="before")
+    @field_validator("marketplaces", "cors_origins", "admin_emails", "manager_emails", mode="before")
     @classmethod
     def _split_csv(cls, v):
         """Списочные поля в .env — строка через запятую."""

@@ -7,10 +7,16 @@ analyze() — генератор событий прогресса для SSE.
 """
 from __future__ import annotations
 
-from typing import Iterator, List, Tuple
+from dataclasses import dataclass, field
+from datetime import date
+from typing import Dict, Iterator, List, Optional, Tuple
 
 import compare
+import db
+import embeddings
 import extract as extract_mod
+import repository
+from config import get_settings
 from logging_conf import get_logger
 from match import get_matcher
 from models import AnalysisReport, Item, ItemReport, MatchDecision, PriceHit
@@ -21,13 +27,69 @@ from search import get_provider
 log = get_logger("pipeline")
 
 
-def _process_item(item: Item) -> ItemReport:
-    """Полный цикл по одной позиции. Не бросает исключений наружу."""
+@dataclass
+class ItemContext:
+    """Серверный контекст позиции для повторного исторического анализа по периоду.
+    Эмбеддинг тяжёлый — держим на сервере, клиенту не отдаём."""
+
+    name: str
+    canonical_key: str
+    canonical_name: str
+    ntin: Optional[str]
+    kp_unit_price: Optional[float]
+    embedding: Optional[List[float]] = None
+    model: Optional[str] = None
+    manufacturer: Optional[str] = None
+
+
+# Контексты позиций по job_id — для эндпоинта исторического анализа (пересчёт по периоду).
+JOB_CONTEXTS: Dict[str, List[ItemContext]] = {}
+
+
+def _persist_search_history(item: Item, query, report: ItemReport,
+                            embedding: Optional[List[float]], canonical: str) -> None:
+    """Сохраняет подтверждённые (matched) рыночные цены в price_search_history."""
+    s = get_settings()
+    if not db.is_enabled() or (s.search_provider or "mock").lower() == "mock":
+        return
+    if not report.confirmed_prices:
+        return
+    try:
+        with db.session_scope() as sess:
+            for cp in report.confirmed_prices:
+                repository.record_search_result(
+                    sess,
+                    query=query.query if query else item.name,
+                    item_name=item.name,
+                    canonical=canonical,
+                    model=None,
+                    unit_price=cp.price_per_kp_unit,   # нормализовано к единице КП
+                    currency=cp.currency,
+                    source_url=cp.url,
+                    source_site=cp.source,
+                    found_at=date.today(),
+                    embedding=embedding,
+                )
+    except Exception as e:  # БД не должна ронять анализ
+        log.warning("не сохранил историю поиска: %s", e)
+
+
+def _process_item(item: Item) -> Tuple[ItemReport, ItemContext]:
+    """Полный цикл по одной позиции. Не бросает исключений наружу.
+    Возвращает отчёт + серверный контекст для исторического анализа."""
     stage_log: List[str] = []
+    canonical = repository.canonical_key(item.name, None, None, item.ntin)
+    ctx = ItemContext(name=item.name, canonical_key=canonical, canonical_name=item.name,
+                      ntin=item.ntin, kp_unit_price=compare._kp_unit_price(item))
     try:
         # 3) нормализация
         query = normalize_item(item)
+        ctx.canonical_name = query.query
+        ctx.canonical_key = canonical = repository.canonical_key(query.query, None, None, item.ntin)
         stage_log.append(f"запрос: «{query.query}» (множитель x{query.pack_multiplier:g})")
+
+        # эмбеддинг канонического имени (для семантического поиска аналогов)
+        ctx.embedding = embeddings.embed(query.query) if (db.is_enabled() or embeddings.is_enabled()) else None
 
         # 4) поиск ссылок
         provider = get_provider()
@@ -64,11 +126,15 @@ def _process_item(item: Item) -> ItemReport:
             hits_with_decisions.append((hit, decision))
 
         # 7) сравнение и флаг
-        return compare.build_item_report(item, query, hits_with_decisions, stage_log=stage_log)
+        report = compare.build_item_report(item, query, hits_with_decisions, stage_log=stage_log)
+
+        # сохраняем найденные рыночные цены в историю веб-поиска (с датой)
+        _persist_search_history(item, query, report, ctx.embedding, canonical)
+        return report, ctx
 
     except Exception as e:
         log.exception("позиция «%s» упала целиком", item.name[:40])
-        return compare.build_item_report(item, None, [], stage_log=stage_log, error=str(e))
+        return compare.build_item_report(item, None, [], stage_log=stage_log, error=str(e)), ctx
 
 
 def analyze(job_id: str, filename: str, content: bytes) -> Iterator[dict]:
@@ -101,16 +167,21 @@ def analyze(job_id: str, filename: str, content: bytes) -> Iterator[dict]:
     yield {"type": "parsed", "count": total}
 
     # 3–7) по позициям, последовательно
+    contexts: List[ItemContext] = []
     for idx, item in enumerate(items):
         yield {"type": "item_start", "index": idx, "total": total, "name": item.name}
-        item_report = _process_item(item)
+        item_report, ctx = _process_item(item)
         report.items.append(item_report)
+        contexts.append(ctx)
         yield {
             "type": "item_done",
             "index": idx,
             "total": total,
             "report": item_report.model_dump(),
         }
+
+    # сохраняем контексты позиций для последующего исторического анализа по периоду
+    JOB_CONTEXTS[job_id] = contexts
 
     # 8) сводка
     report.summary = compare.build_summary(report.items)

@@ -1,11 +1,5 @@
 import React, { useState } from 'react'
-
-function fmt(n) {
-  if (n == null) return '—'
-  return new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 2 }).format(n)
-}
-
-const FLAG_LABEL = { green: 'Норма', yellow: 'Внимание', red: 'Завышение', gray: 'Проверить' }
+import { useI18n } from '../i18n.jsx'
 
 function Delta({ v }) {
   if (v == null) return <span>—</span>
@@ -27,15 +21,13 @@ function Links({ prices }) {
   )
 }
 
-function Row({ r }) {
+function Row({ r, fmt, flagLabel }) {
   const [open, setOpen] = useState(false)
   return (
     <>
       <tr className={`row-${r.flag}`}>
         <td className="name">
-          <button className="expand" onClick={() => setOpen((o) => !o)} title="Детали этапов">
-            {open ? '▾' : '▸'}
-          </button>
+          <button className="expand" onClick={() => setOpen((o) => !o)}>{open ? '▾' : '▸'}</button>
           {r.item.name}
         </td>
         <td className="num">{fmt(r.item.qty)} {r.item.unit || ''}</td>
@@ -43,29 +35,20 @@ function Row({ r }) {
         <td className="num">{fmt(r.market_min)}</td>
         <td className="num">{fmt(r.market_median)}</td>
         <td className="num"><Delta v={r.delta_pct} /></td>
-        <td>
-          <span className={`flag ${r.flag}`}>{FLAG_LABEL[r.flag] || r.flag}</span>
-        </td>
+        <td><span className={`flag ${r.flag}`}>{flagLabel(r.flag)}</span></td>
         <td><Links prices={r.confirmed_prices} /></td>
       </tr>
       {open && (
         <tr className="detail-row">
           <td colSpan={8}>
             <div className="detail">
-              <div><strong>Решение:</strong> {r.flag_reason}</div>
-              {r.error && <div className="err">Ошибка: {r.error}</div>}
-              {r.query && (
-                <div><strong>Запрос:</strong> «{r.query.query}» (множитель ×{r.query.pack_multiplier})</div>
-              )}
-              {r.avg_confidence != null && (
-                <div><strong>Ср. confidence:</strong> {r.avg_confidence.toFixed(2)}</div>
-              )}
+              <div><strong>·</strong> {r.flag_reason}</div>
+              {r.error && <div className="err">{r.error}</div>}
+              {r.query && <div><strong>Запрос:</strong> «{r.query.query}» (×{r.query.pack_multiplier})</div>}
               {r.stage_log?.length > 0 && (
                 <details>
-                  <summary>Лог этапов ({r.stage_log.length})</summary>
-                  <ul className="stage-log">
-                    {r.stage_log.map((s, i) => <li key={i}>{s}</li>)}
-                  </ul>
+                  <summary>{r.stage_log.length}</summary>
+                  <ul className="stage-log">{r.stage_log.map((s, i) => <li key={i}>{s}</li>)}</ul>
                 </details>
               )}
             </div>
@@ -77,23 +60,26 @@ function Row({ r }) {
 }
 
 export default function ItemsTable({ items }) {
+  const { t, locale } = useI18n()
+  const fmt = (n) => (n == null ? '—' : new Intl.NumberFormat(locale, { maximumFractionDigits: 2 }).format(n))
+  const flagLabel = (f) => t('flag_' + f)
   return (
     <section className="table-wrap">
       <table className="items">
         <thead>
           <tr>
-            <th>Наименование</th>
-            <th>Кол-во</th>
-            <th>Цена КП</th>
-            <th>Мин рынка</th>
-            <th>Медиана</th>
-            <th>Дельта %</th>
-            <th>Флаг</th>
-            <th>Ссылки</th>
+            <th>{t('th_name')}</th>
+            <th>{t('th_qty')}</th>
+            <th>{t('th_kp_price')}</th>
+            <th>{t('th_market_min')}</th>
+            <th>{t('th_median')}</th>
+            <th>{t('th_delta')}</th>
+            <th>{t('th_flag')}</th>
+            <th>{t('th_links')}</th>
           </tr>
         </thead>
         <tbody>
-          {items.map((r, i) => <Row key={i} r={r} />)}
+          {items.map((r, i) => <Row key={i} r={r} fmt={fmt} flagLabel={flagLabel} />)}
         </tbody>
       </table>
     </section>

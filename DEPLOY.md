@@ -55,6 +55,12 @@ ROOT_PATH=/agents/procurement                   # под-путь портала
 VITE_BASE=/agents/procurement/
 VITE_API_BASE=/agents/procurement
 BIND_HOST=127.0.0.1                             # для systemd-варианта
+
+# База знаний (Этап 1) — своя БД PostgreSQL 16 + pgvector.
+POSTGRES_PASSWORD=<надёжный-пароль>
+DATABASE_URL=postgresql://procurement:<тот-же-пароль>@procurement-db:5432/procurement
+EMBEDDING_URL=http://<OLLAMA_HOST>:11434/api/embeddings   # snowflake-arctic-embed2, 1024d
+DEFAULT_PRICE_PERIOD_MONTHS=6
 ```
 
 > Docker + LLM на том же хосте — используйте `host.docker.internal` в `LLM_BASE_URL`
@@ -152,6 +158,22 @@ redir /agents/procurement /agents/procurement/ 308
   прокси-таймауты подняты до 600с.
 - **Изоляция ошибок.** Сбой на одной позиции/источнике не роняет весь анализ;
   недоступные страницы помечаются, LLM-таймаут по позиции возвращает понятную ошибку.
+
+## База знаний и бэкапы (Этап 1)
+
+- Схема БД поднимается автоматически: контейнер `procurement` при старте выполняет
+  `alembic upgrade head` (см. `backend/entrypoint.sh`), включая `CREATE EXTENSION vector`.
+- БД `procurement-db` (образ `pgvector/pgvector:pg16`) **на хост не публикуется** — доступна
+  только сервису по внутренней сети `deploy_default`. Данные — в томе `procurement_pg_data`.
+- Эмбеддинги для семантического поиска аналогов берутся с Ollama (`EMBEDDING_URL`,
+  модель `snowflake-arctic-embed2`, 1024d). Если Ollama недоступен — семантика тихо
+  отключается, точный поиск аналогов (по NTIN/модели) продолжает работать.
+- **Бэкап БД**: `./scripts/backup.sh` (pg_dump → gzip в `./backups`, ротация 30 шт.).
+  Восстановление — команда указана в шапке скрипта. Поставьте в cron:
+  ```bash
+  0 2 * * * cd /path/to/procurement && ./scripts/backup.sh >> backups/cron.log 2>&1
+  ```
+- Проверка миграций вручную: `docker exec procurement alembic current`.
 
 ## Фаза 2 (задел в коде, не активно)
 

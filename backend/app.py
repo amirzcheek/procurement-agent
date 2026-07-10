@@ -16,14 +16,16 @@ import json
 import threading
 import uuid
 from pathlib import Path
-from typing import Dict
+from typing import Dict, Optional
 from urllib.parse import unquote
 
 from fastapi import FastAPI, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
+from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
+import knowledge
 import pipeline
 import report as report_mod
 from config import get_settings
@@ -63,14 +65,11 @@ def health():
     return {"status": "ok"}
 
 
-@app.get("/auth/session")
-def auth_session(request: Request):
-    """Текущий пользователь для навбара (имя + флаг админа).
+def current_user(request: Request) -> dict:
+    """Текущий пользователь из заголовков forward_auth платформы: имя, email, роль.
 
-    Авторизацию делает платформа на уровне Caddy (forward_auth) и прокидывает
-    данные пользователя заголовками (copy_headers). Здесь читаем их; если нет —
-    возвращаем «гостя» (навбар просто не покажет имя/админку). Значения приходят
-    URL-кодированными — раскодируем через unquote.
+    Роль: admin (X-Is-Admin/группа admin или email в ADMIN_EMAILS) → manager
+    (email в MANAGER_EMAILS) → procurer (по умолчанию).
     """
     h = request.headers
     display_name = ""
@@ -81,15 +80,31 @@ def auth_session(request: Request):
             break
 
     email = ""
-    for name in ("x-user-email", "x-forwarded-email", "remote-email"):
-        value = h.get(name)
+    for name in settings.auth_email_headers.split(","):
+        value = h.get(name.strip())
         if value:
-            email = unquote(value)
+            email = unquote(value).strip().lower()
             break
 
     groups = (h.get("remote-groups") or h.get("x-forwarded-groups") or "").lower()
-    is_admin = h.get(settings.auth_admin_header, "").lower() in ("1", "true", "yes") or "admin" in groups
-    return {"user": {"displayName": display_name, "email": email, "isAdmin": is_admin}}
+    is_admin = (
+        h.get(settings.auth_admin_header, "").lower() in ("1", "true", "yes")
+        or "admin" in groups
+        or (email and email in [e.lower() for e in settings.admin_emails])
+    )
+    if is_admin:
+        role = "admin"
+    elif email and email in [e.lower() for e in settings.manager_emails]:
+        role = "manager"
+    else:
+        role = "procurer"
+    return {"displayName": display_name, "email": email, "isAdmin": is_admin, "role": role}
+
+
+@app.get("/auth/session")
+def auth_session(request: Request):
+    """Текущий пользователь для навбара (имя, роль, флаг админа)."""
+    return {"user": current_user(request)}
 
 
 @app.get("/config")
@@ -100,6 +115,8 @@ def config_public():
         "match_confidence_min": settings.match_confidence_min,
         "max_prices_per_item": settings.max_prices_per_item,
         "llm_model": settings.llm_model,
+        "db_enabled": bool(settings.database_url),
+        "default_price_period_months": settings.default_price_period_months,
     }
 
 
@@ -155,20 +172,83 @@ async def analyze(file: UploadFile):
 
 
 @app.get("/export/{job_id}")
-def export(job_id: str):
+def export(job_id: str, period_months: Optional[int] = None,
+           date_from: Optional[str] = None, date_to: Optional[str] = None):
     report = JOBS.get(job_id)
     if report is None:
         return JSONResponse(
             {"error": "Отчёт не найден или ещё не готов. Сначала выполните анализ."},
             status_code=404,
         )
-    data = report_mod.build_xlsx(report)
+    # Исторический анализ за период добавляется листом, если база знаний включена.
+    historical = None
+    if settings.database_url:
+        try:
+            historical = knowledge.historical_for_job(job_id, period_months, date_from, date_to)
+        except Exception as e:
+            log.warning("export: исторический анализ не добавлен: %s", e)
+    data = report_mod.build_xlsx(report, historical=historical)
     safe_name = f"procurement_{job_id[:8]}.xlsx"
     return Response(
         content=data,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f'attachment; filename="{safe_name}"'},
     )
+
+
+# ── База знаний закупок (Этап 1) ────────────────────────────────────────────
+class HistoricalRequest(BaseModel):
+    job_id: str
+    period_months: Optional[int] = None
+    date_from: Optional[str] = None
+    date_to: Optional[str] = None
+
+
+class ConfirmRequest(BaseModel):
+    header: dict = Field(default_factory=dict)
+    items: list = Field(default_factory=list)
+
+
+@app.post("/knowledge/extract")
+async def knowledge_extract(file: UploadFile):
+    """Извлечь позиции из договора/КП для подтверждения перед записью в базу знаний."""
+    import extract as extract_mod
+    import parse_items as parse_mod
+
+    content = await file.read()
+    if not content:
+        return JSONResponse({"error": "Пустой файл."}, status_code=400)
+    try:
+        raw = extract_mod.extract(file.filename or "upload", content)
+        items = parse_mod.parse_items(raw)
+    except extract_mod.ExtractionError as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+    except Exception as e:
+        log.exception("knowledge_extract упал")
+        return JSONResponse({"error": f"Не удалось разобрать файл: {e}"}, status_code=500)
+    return {"filename": file.filename, "items": [it.model_dump() for it in items]}
+
+
+@app.post("/knowledge/confirm")
+def knowledge_confirm(req: ConfirmRequest, request: Request):
+    """Подтверждение и запись договора/КП в базу знаний."""
+    user = current_user(request)
+    if not settings.database_url:
+        return JSONResponse({"error": "База знаний выключена (DATABASE_URL не задан)."}, status_code=503)
+    if not req.items:
+        return JSONResponse({"error": "Нет позиций для сохранения."}, status_code=400)
+    try:
+        res = knowledge.ingest_contract(req.header, req.items, user["email"] or None)
+    except Exception as e:
+        log.exception("knowledge_confirm упал")
+        return JSONResponse({"error": f"Ошибка сохранения: {e}"}, status_code=500)
+    return {"ok": True, **res}
+
+
+@app.post("/analysis/historical")
+def analysis_historical(req: HistoricalRequest):
+    """Исторический ценовой анализ по job за выбранный период (пересчёт при смене периода)."""
+    return knowledge.historical_for_job(req.job_id, req.period_months, req.date_from, req.date_to)
 
 
 # ── Раздача собранного веб-интерфейса (React) ───────────────────────────────

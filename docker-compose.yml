@@ -1,8 +1,5 @@
-# Развёртывание агента «Анализатор закупок» через Docker (единый сервис:
-# FastAPI отдаёт и API, и собранный React). Запуск:  docker compose up -d --build
-#
-# Имя сервиса = procurement, чтобы Caddy резолвил его по имени:
-#   reverse_proxy procurement:8080
+# Развёртывание агента «Анализатор закупок» (Этап 1): единый сервис (FastAPI+React)
+# + отдельная БД знаний PostgreSQL 16 с pgvector. Запуск: docker compose up -d --build
 services:
   procurement:
     build:
@@ -11,28 +8,51 @@ services:
         # Под-путь агента на портале (слаг) и базовый адрес API (тот же слаг).
         VITE_BASE: ${VITE_BASE:-/agents/procurement/}
         VITE_API_BASE: ${VITE_API_BASE:-/agents/procurement}
-        # Ставить crawl4ai+Chromium (нужно только для SEARCH_PROVIDER=serper).
-        # Для gemini/mock оставить false — образ легче и собирается быстрее.
+        # crawl4ai+Chromium нужен только для SEARCH_PROVIDER=serper. Для gemini — false.
         INSTALL_CRAWL: ${INSTALL_CRAWL:-false}
     container_name: procurement
     restart: unless-stopped
-    # Переменные окружения (LLM, Serper, ROOT_PATH и т.п.) — из .env.
     env_file: .env
     expose:
       - "8080"
-
-    # Caddy ходит к сервису по имени procurement:8080 ВНУТРИ общей docker-сети
-    # платформы (там же, где Caddy и web:3000). Публиковать порт на хост не нужно.
+    depends_on:
+      procurement-db:
+        condition: service_healthy
     networks:
-      - platform
-
-    # Если LLM/OVMS на ТОМ ЖЕ хосте, что и Docker, изнутри контейнера её адрес —
-    # host.docker.internal (для OVMS на отдельном сервере это НЕ нужно):
+      - platform        # доступ от Caddy/nginx портала (внешняя сеть платформы)
+      - deploy_default   # доступ к своей БД знаний
+    # Если LLM/OVMS на том же хосте, что и Docker:
     # extra_hosts:
     #   - "host.docker.internal:host-gateway"
 
+  # Собственная БД знаний закупок. НЕ переиспользуем чужие БД. На хост не публикуется.
+  procurement-db:
+    image: pgvector/pgvector:pg16
+    container_name: procurement-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-procurement}
+      # Пароль — только из .env, в compose не хардкодим.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD не задан в .env}
+      POSTGRES_DB: ${POSTGRES_DB:-procurement}
+    volumes:
+      - procurement_pg_data:/var/lib/postgresql/data
+    networks:
+      - deploy_default
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-procurement} -d ${POSTGRES_DB:-procurement}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  procurement_pg_data:
+
 networks:
-  # Внешняя сеть платформы (та, где Caddy и сервис web). Имя подставьте своё.
+  # Внешняя сеть платформы (где Caddy и web). Имя подставьте своё.
   platform:
     external: true
     name: ${PLATFORM_NETWORK:-platform}
+  # Внутренняя сеть агента и его БД (наружу не публикуется).
+  deploy_default:
+    driver: bridge

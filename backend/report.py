@@ -28,7 +28,56 @@ def _style_header(ws, ncols: int) -> None:
         cell.alignment = Alignment(vertical="center", wrap_text=True)
 
 
-def build_xlsx(report: AnalysisReport) -> bytes:
+_RISK_FILL = {
+    "low": _FLAG_FILL["green"],
+    "medium": _FLAG_FILL["yellow"],
+    "high": _FLAG_FILL["red"],
+    "unknown": _FLAG_FILL["gray"],
+}
+_RISK_RU = {"low": "Низкий", "medium": "Средний", "high": "Высокий", "unknown": "Нет данных"}
+
+
+def _add_historical_sheet(wb: Workbook, historical: dict) -> None:
+    """Лист исторического анализа цен за выбранный период (min/max по двум источникам)."""
+    period = historical.get("period_label", "")
+    ws = wb.create_sheet("История цен")
+    ws.append([f"Исторический анализ цен — {period}"])
+    ws["A1"].font = Font(bold=True)
+    headers = [
+        "Наименование", "Цена КП", "Внутр. мин", "Внутр. макс", "Внутр. n",
+        "Веб мин", "Веб макс", "Веб n", "Диапазон мин", "Диапазон макс",
+        "Тренд (веб) %", "Риск", "Рекомендация",
+    ]
+    ws.append(headers)
+    for c in range(1, len(headers) + 1):
+        cell = ws.cell(row=2, column=c)
+        cell.fill = _HEADER_FILL
+        cell.font = _HEADER_FONT
+        cell.alignment = Alignment(vertical="center", wrap_text=True)
+
+    for it in historical.get("items", []):
+        internal = it.get("internal") or {}
+        web = it.get("web") or {}
+        risk = it.get("risk_level", "unknown")
+        ws.append([
+            it.get("name", ""),
+            it.get("kp_unit_price"),
+            internal.get("min"), internal.get("max"), internal.get("count"),
+            web.get("min"), web.get("max"), web.get("count"),
+            it.get("combined_min"), it.get("combined_max"),
+            web.get("trend_pct"),
+            _RISK_RU.get(risk, risk),
+            it.get("recommendation") or it.get("message") or "",
+        ])
+        ws.cell(row=ws.max_row, column=12).fill = _RISK_FILL.get(risk, _RISK_FILL["unknown"])
+
+    widths = [42, 12, 12, 12, 8, 12, 12, 8, 12, 12, 11, 12, 46]
+    for idx, w in enumerate(widths, start=1):
+        ws.column_dimensions[get_column_letter(idx)].width = w
+    ws.freeze_panes = "A3"
+
+
+def build_xlsx(report: AnalysisReport, historical: dict | None = None) -> bytes:
     wb = Workbook()
 
     # ── Лист «Позиции» ───────────────────────────────────────────────────────
@@ -91,6 +140,10 @@ def build_xlsx(report: AnalysisReport) -> bytes:
     ws2["B10"].alignment = Alignment(wrap_text=True, vertical="top")
     for rkey, flag in (("A4", "green"), ("A5", "yellow"), ("A6", "red"), ("A7", "gray")):
         ws2[rkey].fill = _FLAG_FILL[flag]
+
+    # ── Лист «История цен» (Этап 1) ─────────────────────────────────────────
+    if historical and historical.get("enabled") and historical.get("items"):
+        _add_historical_sheet(wb, historical)
 
     buf = io.BytesIO()
     wb.save(buf)

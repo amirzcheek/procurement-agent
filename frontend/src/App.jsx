@@ -1,16 +1,19 @@
 import React, { useEffect, useRef, useState } from 'react'
-import { analyze, exportUrl, fetchConfig } from './api.js'
+import { analyze, exportUrl, fetchConfig, historicalAnalysis } from './api.js'
+import { useI18n } from './i18n.jsx'
 import Navbar from './components/Navbar.jsx'
 import Summary from './components/Summary.jsx'
 import ItemsTable from './components/ItemsTable.jsx'
-
-const DISCLAIMER =
-  'Предварительный анализ. Цены найдены автоматически и требуют проверки человеком. ' +
-  'Это подсказка, а не окончательное заключение.'
+import PeriodSelector from './components/PeriodSelector.jsx'
+import HistoricalPanel from './components/HistoricalPanel.jsx'
+import KnowledgeView from './components/KnowledgeView.jsx'
 
 export default function App() {
-  const [file, setFile] = useState(null)
+  const { t } = useI18n()
+  const [tab, setTab] = useState('analyze')
   const [config, setConfig] = useState(null)
+
+  const [file, setFile] = useState(null)
   const [status, setStatus] = useState('idle') // idle | running | done | error
   const [progress, setProgress] = useState({ current: 0, total: 0, label: '' })
   const [items, setItems] = useState([])
@@ -19,14 +22,36 @@ export default function App() {
   const [error, setError] = useState(null)
   const abortRef = useRef(null)
 
+  const [period, setPeriod] = useState({ months: 6 })
+  const [historical, setHistorical] = useState(null)
+  const [histLoading, setHistLoading] = useState(false)
+
   useEffect(() => {
-    fetchConfig().then(setConfig).catch(() => setConfig(null))
+    fetchConfig()
+      .then((c) => {
+        setConfig(c)
+        if (c?.default_price_period_months != null) setPeriod({ months: c.default_price_period_months })
+      })
+      .catch(() => setConfig(null))
   }, [])
 
-  function onPick(e) {
-    setFile(e.target.files?.[0] || null)
-    setError(null)
-  }
+  const dbEnabled = !!config?.db_enabled
+
+  // Пересчёт исторического анализа при готовом job и смене периода.
+  useEffect(() => {
+    if (status !== 'done' || !jobId || !dbEnabled) return
+    // custom-период без обеих дат не считаем
+    if (period.months == null && !period.dateFrom && !period.dateTo) return
+    let active = true
+    setHistLoading(true)
+    historicalAnalysis(jobId, period)
+      .then((h) => active && setHistorical(h))
+      .catch(() => active && setHistorical(null))
+      .finally(() => active && setHistLoading(false))
+    return () => {
+      active = false
+    }
+  }, [status, jobId, dbEnabled, period])
 
   async function onAnalyze() {
     if (!file) return
@@ -35,63 +60,36 @@ export default function App() {
     setSummary(null)
     setJobId(null)
     setError(null)
-    setProgress({ current: 0, total: 0, label: 'Извлечение и разбор позиций…' })
-
+    setHistorical(null)
+    setProgress({ current: 0, total: 0, label: t('progress_parse') })
     const controller = new AbortController()
     abortRef.current = controller
-
     try {
       await analyze(
         file,
         (ev) => {
           switch (ev.type) {
-            case 'job':
-              setJobId(ev.job_id)
-              break
-            case 'extract':
-              setProgress((p) => ({ ...p, label: 'Распознаём позиции из таблицы…' }))
-              break
-            case 'parsed':
-              setProgress({ current: 0, total: ev.count, label: `Найдено позиций: ${ev.count}` })
-              break
+            case 'job': setJobId(ev.job_id); break
+            case 'extract': setProgress((p) => ({ ...p, label: t('progress_extract') })); break
+            case 'parsed': setProgress({ current: 0, total: ev.count, label: `${t('found_items')}: ${ev.count}` }); break
             case 'item_start':
-              setProgress({
-                current: ev.index,
-                total: ev.total,
-                label: `Позиция ${ev.index + 1}/${ev.total}: ${ev.name}`,
-              })
+              setProgress({ current: ev.index, total: ev.total, label: `${t('position')} ${ev.index + 1}/${ev.total}: ${ev.name}` })
               break
             case 'item_done':
               setItems((prev) => [...prev, ev.report])
               setProgress((p) => ({ ...p, current: ev.index + 1 }))
               break
-            case 'done':
-              setSummary(ev.report.summary)
-              setItems(ev.report.items)
-              setStatus('done')
-              break
-            case 'error':
-              setError(ev.message)
-              setStatus('error')
-              break
-            default:
-              break
+            case 'done': setSummary(ev.report.summary); setItems(ev.report.items); setStatus('done'); break
+            case 'error': setError(ev.message); setStatus('error'); break
+            default: break
           }
         },
         controller.signal
       )
       setStatus((s) => (s === 'error' ? s : 'done'))
     } catch (e) {
-      if (e.name !== 'AbortError') {
-        setError(String(e.message || e))
-        setStatus('error')
-      }
+      if (e.name !== 'AbortError') { setError(String(e.message || e)); setStatus('error') }
     }
-  }
-
-  function onCancel() {
-    abortRef.current?.abort()
-    setStatus('idle')
   }
 
   const running = status === 'running'
@@ -102,65 +100,77 @@ export default function App() {
       <div className="wrap">
         <Navbar />
 
-        <h1 className="page-title">Анализатор закупок</h1>
-        <p className="page-subtitle">
-          Проверка цен коммерческого предложения по казахстанским площадкам. Загрузите КП —
-          система извлечёт позиции, найдёт рыночные цены и пометит подозрения на завышение.
-        </p>
+        <nav className="tabs">
+          <button className={'tab' + (tab === 'analyze' ? ' active' : '')} onClick={() => setTab('analyze')}>
+            {t('tab_analyze')}
+          </button>
+          <button className={'tab' + (tab === 'knowledge' ? ' active' : '')} onClick={() => setTab('knowledge')}>
+            {t('tab_knowledge')}
+          </button>
+        </nav>
 
-        <div className="disclaimer" role="note">
-          ⚠️ {DISCLAIMER}
-        </div>
+        <div className="disclaimer" role="note">⚠️ {t('disclaimer')}</div>
 
-        <section className="card controls">
-          <label className="file-input">
-            <input type="file" accept=".xlsx,.xlsm,.pdf" onChange={onPick} disabled={running} />
-            <span>{file ? file.name : 'Выберите файл КП (.xlsx или текстовый .pdf)'}</span>
-          </label>
-          <div className="controls-actions">
-            {!running ? (
-              <button className="btn btn-primary" onClick={onAnalyze} disabled={!file}>
-                Анализировать
-              </button>
-            ) : (
-              <button className="btn btn-stop" onClick={onCancel}>
-                Остановить
-              </button>
+        {tab === 'knowledge' ? (
+          <KnowledgeView dbEnabled={dbEnabled} />
+        ) : (
+          <>
+            <h2 className="page-title">{t('agent_name')}</h2>
+            <p className="page-subtitle">{t('subtitle')}</p>
+
+            <section className="card controls">
+              <label className="file-input">
+                <input type="file" accept=".xlsx,.xlsm,.pdf" onChange={(e) => { setFile(e.target.files?.[0] || null); setError(null) }} disabled={running} />
+                <span>{file ? file.name : t('pick_file')}</span>
+              </label>
+              <div className="controls-actions">
+                {!running ? (
+                  <button className="btn btn-primary" onClick={onAnalyze} disabled={!file}>{t('analyze_btn')}</button>
+                ) : (
+                  <button className="btn btn-stop" onClick={() => { abortRef.current?.abort(); setStatus('idle') }}>{t('cancel_btn')}</button>
+                )}
+                {jobId && status === 'done' && (
+                  <a className="btn btn-ghost" href={exportUrl(jobId, period)}>{t('download_xlsx')}</a>
+                )}
+              </div>
+              {config && (
+                <div className="config-badges">
+                  <span className="badge">{config.search_provider}</span>
+                  {config.db_enabled && <span className="badge">БЗ ✓</span>}
+                </div>
+              )}
+            </section>
+
+            {running && (
+              <section className="progress">
+                <div className="progress-bar"><div className="progress-fill" style={{ width: `${pct}%` }} /></div>
+                <div className="progress-label">{progress.label}</div>
+              </section>
             )}
-            {jobId && status === 'done' && (
-              <a className="btn btn-ghost" href={exportUrl(jobId)}>
-                ⬇ Скачать xlsx
-              </a>
+
+            {error && <div className="error">{t('err_prefix')}: {error}</div>}
+            {summary && <Summary summary={summary} />}
+
+            {items.length > 0 && (
+              <>
+                <h3 className="section-title">{t('market_title')}</h3>
+                <ItemsTable items={items} />
+              </>
             )}
-          </div>
-          {config && (
-            <div className="config-badges">
-              <span className="badge">поиск: {config.search_provider}</span>
-              <span className="badge">модель: {config.llm_model}</span>
-            </div>
-          )}
-        </section>
 
-        {running && (
-          <section className="progress">
-            <div className="progress-bar">
-              <div className="progress-fill" style={{ width: `${pct}%` }} />
-            </div>
-            <div className="progress-label">{progress.label}</div>
-          </section>
-        )}
+            {status === 'done' && items.length > 0 && (
+              <section className="hist-block">
+                <PeriodSelector value={period} onChange={setPeriod} />
+                {dbEnabled ? (
+                  <HistoricalPanel historical={historical} loading={histLoading} />
+                ) : (
+                  <div className="notice">{t('hist_disabled')}</div>
+                )}
+              </section>
+            )}
 
-        {error && <div className="error">Ошибка: {error}</div>}
-
-        {summary && <Summary summary={summary} />}
-
-        {items.length > 0 && <ItemsTable items={items} />}
-
-        {status === 'idle' && !items.length && (
-          <p className="muted hint">
-            Позиции обрабатываются последовательно — при реальном поиске это может занять время
-            (локальный LLM на CPU + загрузка страниц магазинов).
-          </p>
+            {status === 'idle' && !items.length && <p className="muted hint">{t('hint_idle')}</p>}
+          </>
         )}
       </div>
     </div>
