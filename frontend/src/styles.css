@@ -84,6 +84,34 @@ a {
   color: var(--text);
   letter-spacing: -0.01em;
 }
+
+/* ── Переключатель языка (как на портале) ── */
+.lang-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px;
+  border-radius: 999px;
+  background: #f7f9fc;
+  border: 1px solid var(--line);
+}
+.lang-btn {
+  border: none;
+  background: transparent;
+  color: var(--sub);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 6px 10px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+.lang-btn.active {
+  background: #fff;
+  color: var(--accent);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
 .topbar-right {
   display: flex;
   align-items: center;
