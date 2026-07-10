@@ -87,19 +87,22 @@ def ingest_contract(header: dict, items: List[dict], user_email: Optional[str]) 
     if not db.is_enabled():
         raise RuntimeError("База знаний выключена (DATABASE_URL не задан).")
 
+    # Нормализуем header: пустые строки из формы → None (иначе "" не лезет в date/number).
+    header = {k: (v.strip() if isinstance(v, str) else v) for k, v in (header or {}).items()}
+    header = {k: (None if v == "" else v) for k, v in header.items()}
+    d = header.get("date")
+    if isinstance(d, str):
+        try:
+            header["date"] = date.fromisoformat(d)
+        except ValueError:
+            header["date"] = None  # некорректная дата — не роняем сохранение
+
     # обогащаем позиции каноническим ключом и эмбеддингом
     for it in items:
         canonical = repository.canonical_key(
             it.get("name", ""), it.get("model"), it.get("manufacturer"), it.get("ntin"))
         it["canonical_name"] = it.get("canonical_name") or canonical
         it["embedding"] = embeddings.embed(it.get("canonical_name") or it.get("name", ""))
-
-    # дата закупки
-    if header.get("date") and isinstance(header["date"], str):
-        try:
-            header["date"] = date.fromisoformat(header["date"])
-        except ValueError:
-            header["date"] = None
 
     with db.session_scope() as sess:
         contract = repository.save_contract(sess, header=header, items=items, created_by=user_email)

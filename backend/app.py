@@ -124,6 +124,14 @@ def _sse(ev: dict) -> dict:
     return {"event": ev.get("type", "message"), "data": json.dumps(ev, ensure_ascii=False)}
 
 
+def _friendly_error(e: Exception) -> str:
+    """Короткое человекочитаемое сообщение вместо сырого SQL/трейсбека.
+    Полная ошибка уходит в лог; пользователю — суть (первая строка первопричины)."""
+    cause = getattr(e, "orig", None) or e   # у SQLAlchemy-ошибок исходная — в .orig
+    msg = str(cause).split("\n")[0].strip()
+    return msg[:300] if msg else e.__class__.__name__
+
+
 @app.post("/analyze")
 async def analyze(file: UploadFile):
     content = await file.read()
@@ -225,7 +233,7 @@ async def knowledge_extract(file: UploadFile):
         return JSONResponse({"error": str(e)}, status_code=400)
     except Exception as e:
         log.exception("knowledge_extract упал")
-        return JSONResponse({"error": f"Не удалось разобрать файл: {e}"}, status_code=500)
+        return JSONResponse({"error": f"Не удалось разобрать файл: {_friendly_error(e)}"}, status_code=500)
     return {"filename": file.filename, "items": [it.model_dump() for it in items]}
 
 
@@ -241,7 +249,7 @@ def knowledge_confirm(req: ConfirmRequest, request: Request):
         res = knowledge.ingest_contract(req.header, req.items, user["email"] or None)
     except Exception as e:
         log.exception("knowledge_confirm упал")
-        return JSONResponse({"error": f"Ошибка сохранения: {e}"}, status_code=500)
+        return JSONResponse({"error": f"Не удалось сохранить: {_friendly_error(e)}"}, status_code=500)
     return {"ok": True, **res}
 
 
