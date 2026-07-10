@@ -17,15 +17,20 @@ export default function KnowledgeView({ dbEnabled }) {
   const [cond, setCond] = useState({ penalties: false, appendices: false, tech_spec: false })
   const [status, setStatus] = useState('idle') // idle | extracting | ready | saving | saved | error
   const [error, setError] = useState(null)
+  const [sourceType, setSourceType] = useState(null)
+
+  const scanLikely = file && (file.type.startsWith('image/') || file.name.toLowerCase().endsWith('.pdf'))
 
   async function onExtract() {
     if (!file) return
     setStatus('extracting')
     setError(null)
     setItems([])
+    setSourceType(null)
     try {
       const res = await knowledgeExtract(file)
       setItems(res.items || [])
+      setSourceType(res.source_type || null)
       setStatus('ready')
     } catch (e) {
       setError(String(e.message || e))
@@ -37,7 +42,7 @@ export default function KnowledgeView({ dbEnabled }) {
     setStatus('saving')
     setError(null)
     try {
-      await knowledgeConfirm({ ...header, conditions: cond }, items)
+      await knowledgeConfirm({ ...header, conditions: cond, source_type: sourceType }, items)
       setStatus('saved')
     } catch (e) {
       setError(String(e.message || e))
@@ -59,7 +64,7 @@ export default function KnowledgeView({ dbEnabled }) {
         <label className="file-input">
           <input
             type="file"
-            accept=".xlsx,.xlsm,.pdf"
+            accept=".xlsx,.xlsm,.pdf,.png,.jpg,.jpeg,.tiff,.webp"
             disabled={status === 'extracting' || !dbEnabled || !canWrite}
             onChange={(e) => {
               setFile(e.target.files?.[0] || null)
@@ -74,7 +79,11 @@ export default function KnowledgeView({ dbEnabled }) {
         </button>
       </section>
 
+      {status === 'extracting' && scanLikely && <div className="notice">🔎 {t('ocr_recognizing')}</div>}
       {error && <div className="error">{t('err_prefix')}: {error}</div>}
+      {sourceType === 'ocr' && status !== 'saved' && (
+        <div className="disclaimer">⚠️ <b>{t('ocr_badge')}.</b> {t('ocr_notice')}</div>
+      )}
       {status === 'saved' && <div className="notice ok">{t('kb_saved')}</div>}
 
       {items.length > 0 && status !== 'saved' && (

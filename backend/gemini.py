@@ -41,6 +41,69 @@ def openai_client() -> Optional[OpenAI]:
     return _oai
 
 
+# ── OCR сканов (Gemini vision) ───────────────────────────────────────────────
+_OCR_PROMPT_TEXT = (
+    "Извлеки ВЕСЬ текст с этого изображения документа (коммерческое предложение/договор/"
+    "спецификация). Сохрани структуру таблиц: каждая строка позиции — на отдельной строке, "
+    "колонки разделяй символом |. Языки: русский, казахский, английский. "
+    "Верни только распознанный текст, без комментариев и пояснений."
+)
+_OCR_PROMPT_JSON = (
+    "Распознай таблицу позиций на изображении документа (КП/договор). "
+    "Верни ТОЛЬКО JSON-массив объектов, без пояснений: "
+    '{"name": str, "model": str|null, "manufacturer": str|null, "category": str|null, '
+    '"qty": number|null, "unit": str|null, "unit_price": number|null, "total_price": number|null}. '
+    "Числа без пробелов и валютных символов. Языки: русский/казахский/английский. "
+    "Чего нет на изображении — null. Строки-итоги и заголовки не включай."
+)
+
+
+def _vision_generate(image_bytes: bytes, prompt: str, mime: str = "image/png") -> str:
+    """Один мультимодальный вызов Gemini: изображение + промпт → текст."""
+    import base64
+
+    s = get_settings()
+    if not is_configured():
+        raise RuntimeError("OCR через Gemini недоступен: не задан GEMINI_API_KEY")
+    model = s.ocr_model or s.gemini_model
+    url = f"{s.gemini_base_url.rstrip('/')}/models/{model}:generateContent"
+    parts = [
+        {"text": prompt},
+        {"inline_data": {"mime_type": mime, "data": base64.b64encode(image_bytes).decode("ascii")}},
+    ]
+    headers = {"Content-Type": "application/json", "X-goog-api-key": s.gemini_api_key}
+    with httpx.Client(timeout=s.llm_timeout) as client:
+        r = client.post(url, json={"contents": [{"parts": parts}]}, headers=headers)
+        r.raise_for_status()
+        data = r.json()
+    cand = (data.get("candidates") or [{}])[0]
+    return "".join(p.get("text", "") for p in cand.get("content", {}).get("parts", []) or [])
+
+
+def ocr_page_text(image_bytes: bytes, mime: str = "image/png") -> str:
+    """OCR страницы → текст с сохранённой табличной разметкой (режим text)."""
+    return _vision_generate(image_bytes, _OCR_PROMPT_TEXT, mime).strip()
+
+
+def ocr_page_items(image_bytes: bytes, mime: str = "image/png") -> List[dict]:
+    """OCR страницы → сразу структурированные позиции (режим structured)."""
+    from llm import extract_json
+
+    raw = _vision_generate(image_bytes, _OCR_PROMPT_JSON, mime)
+    try:
+        data = extract_json(raw)
+    except ValueError:
+        return []
+    if isinstance(data, dict):
+        for k in ("items", "positions", "data"):
+            if isinstance(data.get(k), list):
+                data = data[k]
+                break
+        else:
+            data = [data]
+    return [x for x in data if isinstance(x, dict) and (x.get("name") or "").strip()] if isinstance(data, list) else []
+
+
 def _domain(url: str) -> str:
     try:
         host = url.split("//", 1)[-1].split("/", 1)[0]

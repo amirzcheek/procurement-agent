@@ -246,14 +246,19 @@ async def knowledge_extract(file: UploadFile, request: Request):
     if not content:
         return JSONResponse({"error": "Пустой файл."}, status_code=400)
     try:
-        raw = extract_mod.extract(file.filename or "upload", content)
-        items = parse_mod.parse_items(raw)
+        res = extract_mod.extract(file.filename or "upload", content)
+        if res.items is not None:  # OCR_MODE=structured — позиции уже готовы
+            from models import Item as _Item
+            items = [_Item.model_validate(x) for x in res.items if (x.get("name") or "").strip()]
+        else:
+            items = parse_mod.parse_items(res.text)
     except extract_mod.ExtractionError as e:
         return JSONResponse({"error": str(e)}, status_code=400)
     except Exception as e:
         log.exception("knowledge_extract упал")
         return JSONResponse({"error": f"Не удалось разобрать файл: {_friendly_error(e)}"}, status_code=500)
-    return {"filename": file.filename, "items": [it.model_dump() for it in items]}
+    return {"filename": file.filename, "items": [it.model_dump() for it in items],
+            "source_type": res.source_type}
 
 
 @app.post("/knowledge/confirm")

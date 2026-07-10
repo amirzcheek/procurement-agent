@@ -98,6 +98,8 @@ class LineItem(Base):
     ntin: Mapped[Optional[str]] = mapped_column(String(50), index=True)
     embedding: Mapped[Optional[list]] = mapped_column(Vector(_DIM))
     purchase_date: Mapped[Optional[date]] = mapped_column(Date, index=True)
+    # Откуда извлечена позиция: xlsx | pdf_text | ocr (для аудита качества, Этап 2 OCR).
+    source_type: Mapped[Optional[str]] = mapped_column(String(10))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 

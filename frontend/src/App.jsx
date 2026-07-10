@@ -80,7 +80,8 @@ export default function App() {
     setJobId(null)
     setError(null)
     setHistorical(null)
-    setProgress({ current: 0, total: 0, label: t('progress_parse') })
+    const scanLikely = file.type.startsWith('image/') || file.name.toLowerCase().endsWith('.pdf')
+    setProgress({ current: 0, total: 0, label: scanLikely ? t('ocr_recognizing') : t('progress_parse') })
     const controller = new AbortController()
     abortRef.current = controller
     try {
@@ -148,7 +149,7 @@ export default function App() {
 
             <section className="card controls">
               <label className="file-input">
-                <input type="file" accept=".xlsx,.xlsm,.pdf" onChange={(e) => { setFile(e.target.files?.[0] || null); setError(null) }} disabled={running} />
+                <input type="file" accept=".xlsx,.xlsm,.pdf,.png,.jpg,.jpeg,.tiff,.webp" onChange={(e) => { setFile(e.target.files?.[0] || null); setError(null) }} disabled={running} />
                 <span>{file ? file.name : t('pick_file')}</span>
               </label>
               <div className="controls-actions">

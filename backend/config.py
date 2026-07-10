@@ -28,6 +28,14 @@ class Settings(BaseSettings):
     gemini_api_key: str = Field(default="")
     gemini_model: str = Field(default="gemini-3.1-flash-lite")
     gemini_base_url: str = Field(default="https://generativelanguage.googleapis.com/v1beta")
+
+    # OCR сканов (Gemini vision). Реквизиты — те же, что для поиска (gemini_*).
+    ocr_enabled: bool = Field(default=True)
+    ocr_provider: str = Field(default="gemini")
+    ocr_min_chars_per_page: int = Field(default=100)  # порог детекта скана
+    ocr_dpi: int = Field(default=250)
+    ocr_mode: str = Field(default="text")             # text | structured
+    ocr_model: str = Field(default="")                # пусто → gemini_model
     search_gl: str = Field(default="kz")
     search_hl: str = Field(default="ru")
     # NoDecode: не давать pydantic-settings json-парсить значение из .env —

@@ -26,10 +26,11 @@ def _make_xlsx() -> bytes:
 
 
 def test_extract_xlsx_finds_rows():
-    text = extract.extract("kp.xlsx", _make_xlsx())
-    assert "Бумага А4 SvetoCopy 500л" in text
-    assert "Картридж HP CF259A" in text
-    assert "Коммерческое предложение" in text  # merged-заголовок развёрнут
+    res = extract.extract("kp.xlsx", _make_xlsx())
+    assert res.source_type == "xlsx"
+    assert "Бумага А4 SvetoCopy 500л" in res.text
+    assert "Картридж HP CF259A" in res.text
+    assert "Коммерческое предложение" in res.text  # merged-заголовок развёрнут
 
 
 def test_unsupported_format():
@@ -38,25 +39,10 @@ def test_unsupported_format():
 
 
 def test_pdf_without_text_raises_ocr(monkeypatch):
-    # Подменяем pdfplumber на «пустой» PDF без текста.
-    class FakePage:
-        def extract_tables(self):
-            return []
+    # PDF без текстового слоя + OCR выключен → понятная ошибка NeedsOCRError.
+    import config
 
-        def extract_text(self):
-            return ""
-
-    class FakePDF:
-        pages = [FakePage()]
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *a):
-            return False
-
-    import pdfplumber
-
-    monkeypatch.setattr(pdfplumber, "open", lambda *a, **k: FakePDF())
+    monkeypatch.setattr(config.get_settings(), "ocr_enabled", False)
+    monkeypatch.setattr(extract, "_pdf_text", lambda content: ("", 1))
     with pytest.raises(extract.NeedsOCRError):
         extract.extract("scan.pdf", b"%PDF-1.4 fake")

@@ -145,9 +145,9 @@ def analyze(job_id: str, filename: str, content: bytes) -> Iterator[dict]:
     """Генератор событий прогресса. Последнее событие type=done содержит полный отчёт."""
     report = AnalysisReport(job_id=job_id, filename=filename)
 
-    # 1) извлечение
+    # 1) извлечение (xlsx / текстовый PDF / скан через OCR)
     try:
-        raw_text = extract_mod.extract(filename, content)
+        result = extract_mod.extract(filename, content)
     except extract_mod.ExtractionError as e:
         yield {"type": "error", "message": str(e)}
         return
@@ -155,11 +155,15 @@ def analyze(job_id: str, filename: str, content: bytes) -> Iterator[dict]:
         log.exception("extract упал")
         yield {"type": "error", "message": f"Ошибка извлечения: {e}"}
         return
-    yield {"type": "extract", "chars": len(raw_text)}
+    yield {"type": "extract", "chars": len(result.text), "source_type": result.source_type}
 
-    # 2) парсинг позиций
+    # 2) структурирование позиций (для OCR_MODE=structured — уже готовые items)
     try:
-        items = parse_items(raw_text)
+        if result.items is not None:
+            items = [Item.model_validate(x) for x in result.items]
+            items = [it for it in items if it.name and it.name.strip()]
+        else:
+            items = parse_items(result.text)
     except Exception as e:
         log.exception("parse_items упал")
         yield {"type": "error", "message": f"Не удалось распарсить позиции: {e}"}

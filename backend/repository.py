@@ -152,6 +152,7 @@ def save_contract(sess: Session, *, header: dict, items: List[dict],
             ntin=it.get("ntin"),
             embedding=it.get("embedding"),
             purchase_date=pdate,
+            source_type=it.get("source_type") or header.get("source_type"),
         ))
         if it.get("unit_price"):
             sess.add(PriceHistory(
@@ -166,7 +167,8 @@ def save_contract(sess: Session, *, header: dict, items: List[dict],
                 purchase_date=pdate,
             ))
     audit(sess, created_by, "save_contract", "contract", contract.id,
-          {"items": len(items), "number": header.get("number")})
+          {"items": len(items), "number": header.get("number"),
+           "source_type": header.get("source_type")})
     return contract
 
 
