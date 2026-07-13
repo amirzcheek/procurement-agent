@@ -139,23 +139,28 @@ def parse_price_items(raw_text: str, allowed_sources: List[str] | None = None) -
         url = (it.get("url") or "").strip()
         if not url.startswith("http"):
             continue
-        source = (it.get("source") or _domain(url)).strip()
-        if allowed_sources and not any(src in source or source in src for src in allowed_sources):
-            # источник не из наших площадок — оставляем, но помечаем реальным доменом
-            source = _domain(url)
+        # Поддержка строгих ключей (item_title/source_site) и старых (title/source).
+        title = (it.get("item_title") or it.get("title") or "").strip()
+        source = (it.get("source_site") or it.get("source") or _domain(url)).strip() or _domain(url)
         price = it.get("price")
         try:
             price = float(price) if price is not None else None
         except (TypeError, ValueError):
             price = None
+        conf = it.get("confidence")
+        try:
+            conf = float(conf) if conf is not None else None
+        except (TypeError, ValueError):
+            conf = None
         out.append(
             {
-                "title": (it.get("title") or "").strip(),
+                "title": title,
                 "price": price,
                 "currency": (it.get("currency") or "KZT").strip() or "KZT",
                 "url": url,
                 "source": source,
                 "in_stock": it.get("in_stock"),
+                "confidence": conf,
             }
         )
     return out
@@ -171,18 +176,19 @@ def grounded_search(query: str) -> List[dict]:
         log.warning("gemini не настроен (нет GEMINI_API_KEY)")
         return []
 
-    markets = ", ".join(s.marketplaces)
     prompt = (
-        f"Используя поиск Google, найди актуальные цены на товар: «{query}» "
-        f"на казахстанских сайтах и маркетплейсах — в первую очередь {markets}, "
-        f"но можно и любые другие казахстанские магазины (цены в тенге). "
-        f"Верни ТОЛЬКО JSON-массив (максимум {s.max_prices_per_item} объектов), без пояснений и без markdown. "
-        'Каждый объект: {"title": str, "price": number|null, "currency": "KZT", '
-        '"url": str, "source": str, "in_stock": bool|null}. '
-        "price — число в тенге за фасовку из названия товара, без пробелов и символов валюты "
-        "(1 250 ₸ → 1250); если цену не нашёл — null. "
-        "url — ПРЯМАЯ ссылка на страницу товара в магазине. source — домен магазина. "
-        "Бери только реально существующие страницы из результатов поиска."
+        f"Используя поиск Google, найди актуальные предложения купить товар: «{query}» "
+        f"в интернете с регионом Казахстан (языки: русский, казахский, английский; цены в тенге). "
+        f"Ищи ШИРОКО по любым магазинам и маркетплейсам, НЕ ограничивай список сайтов. "
+        f"Верни ТОЛЬКО JSON-массив (до {s.search_max_candidates} объектов), без пояснений и без markdown. "
+        'Каждый объект: {"item_title": str, "price": number|null, "currency": "KZT", '
+        '"url": str, "source_site": str, "confidence": number}. '
+        "url ОБЯЗАТЕЛЬНО должен вести на страницу КОНКРЕТНОГО товара с этой ценой (карточку товара), "
+        "а НЕ на главную/категорию/каталог/страницу поиска магазина. "
+        "Если точной ссылки на товар с ценой нет — НЕ выдумывай, пропусти этот результат. "
+        "item_title должен совпадать по бренду и модели с искомым товаром. "
+        "price — число в тенге без пробелов и символов валюты (1 250 ₸ → 1250); "
+        "source_site — домен магазина; confidence — 0..1."
     )
     url = f"{s.gemini_base_url.rstrip('/')}/models/{s.gemini_model}:generateContent"
     payload = {
@@ -208,14 +214,14 @@ def grounded_search(query: str) -> List[dict]:
         log.error("gemini: неожиданный формат ответа: %s", e)
         return []
 
-    items = parse_price_items(text, allowed_sources=s.marketplaces)[: s.max_prices_per_item]
+    items = parse_price_items(text)[: s.search_max_candidates]
     # Ссылки берём из grounding-метаданных (реальные страницы из выдачи Google),
     # а не из «прямых» URL, которые модель может выдумать. Домен — из title чанка.
     items = _attach_grounding_urls(items, chunks)
     # Один проход: разворачиваем Google-редирект в прямой URL магазина, восстанавливаем
     # домен-источник и отсеиваем реально мёртвые ссылки (404/410).
     items = _resolve_and_filter(items)
-    log.info("gemini grounded_search: «%s» → %d цен", query, len(items))
+    log.info("gemini grounded_search: «%s» → %d кандидатов", query, len(items))
     return items
 
 

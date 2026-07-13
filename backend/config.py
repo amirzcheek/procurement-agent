@@ -48,6 +48,15 @@ class Settings(BaseSettings):
     # Матчинг
     match_confidence_min: float = Field(default=0.6)
 
+    # ── Широкий поиск + обязательная верификация цен ──
+    # Ищем шире (без белого списка площадок), но принимаем только подтверждённые цены.
+    search_max_candidates: int = Field(default=15)   # сколько кандидатов брать до проверки
+    link_verify_max: int = Field(default=15)         # максимум страниц на верификацию
+    link_verify_timeout: int = Field(default=25)     # общий таймаут верификации позиции, сек
+    price_match_tolerance: float = Field(default=0.05)  # допуск сниппет vs страница
+    prices_enough: int = Field(default=5)            # набрали столько verified — останавливаемся
+    verify_concurrency: int = Field(default=5)       # параллельных краулов
+
     # ── База знаний закупок (Этап 1) ──
     # PostgreSQL 16 + pgvector. Пусто — БД-функции выключены (агент работает как раньше,
     # только рыночный поиск), чтобы локальная разработка не требовала поднятой БД.

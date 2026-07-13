@@ -89,6 +89,17 @@ class MatchDecision(BaseModel):
     reason: str = ""
 
 
+class PageExtract(BaseModel):
+    """Извлечение со страницы для верификации: цена + признак карточки товара."""
+
+    price: Optional[float] = None
+    currency: str = "KZT"
+    title: str = ""
+    in_stock: Optional[bool] = None
+    # True — это страница КОНКРЕТНОГО товара (карточка), а не категория/каталог/поиск.
+    is_product_page: bool = False
+
+
 class ConfirmedPrice(BaseModel):
     """Подтверждённая матчингом рыночная цена, приведённая к единице КП."""
 
@@ -121,6 +132,10 @@ class ItemReport(BaseModel):
     flag: Flag = "gray"
     flag_reason: str = ""
     estimated_overpay: Optional[float] = None  # переплата по позиции (на весь qty)
+
+    # Статистика широкого поиска + верификации (для отладки качества).
+    candidates_found: int = 0
+    candidates_verified: int = 0
 
     # Лог этапов для отладки на реальных КП.
     stage_log: List[str] = Field(default_factory=list)

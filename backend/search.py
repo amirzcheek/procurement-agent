@@ -77,8 +77,9 @@ class SerperProvider(PriceSearchProvider):
     def search(self, query: str) -> List[SearchResult]:
         if not self.s.serper_api_key:
             raise RuntimeError("SERPER_API_KEY не задан, но SEARCH_PROVIDER=serper")
-        q = f"{query} {_site_filter(self.s.marketplaces)}".strip()
-        payload = {"q": q, "gl": self.s.search_gl, "hl": self.s.search_hl}
+        # Широкий поиск: без site:-фильтра, гео/язык Казахстана, больше кандидатов.
+        payload = {"q": query, "gl": self.s.search_gl, "hl": self.s.search_hl,
+                   "num": self.s.search_max_candidates}
         headers = {"X-API-KEY": self.s.serper_api_key, "Content-Type": "application/json"}
         try:
             with httpx.Client(timeout=30) as client:
@@ -91,7 +92,7 @@ class SerperProvider(PriceSearchProvider):
 
         organic = data.get("organic", []) or []
         results: List[SearchResult] = []
-        for item in organic[: self.s.max_prices_per_item]:
+        for item in organic[: self.s.search_max_candidates]:
             url = item.get("link", "")
             if not url:
                 continue
@@ -107,11 +108,11 @@ class SerperProvider(PriceSearchProvider):
 
 
 class GeminiGroundedProvider(PriceSearchProvider):
-    """Gemini (3.1-flash-lite) с Google Search grounding.
+    """Gemini (3.1-flash-lite) с Google Search grounding — ШИРОКИЙ поиск кандидатов.
 
-    Один вызов сразу отдаёт цену + прямую ссылку по каждому магазину — заменяет
-    Serper И crawl4ai. Цена кладётся прямо в SearchResult, поэтому fetch_price
-    не гоняет браузер (см. fetch_price.py).
+    Возвращает до SEARCH_MAX_CANDIDATES кандидатов (title/url/price-сниппет/source).
+    Цена из сниппета НЕ принимается как окончательная — каждый кандидат ОБЯЗАТЕЛЬНО
+    проходит верификацию страницы (см. verify.py) перед тем, как быть принятым.
     """
 
     def search(self, query: str) -> List[SearchResult]:
@@ -133,7 +134,7 @@ class GeminiGroundedProvider(PriceSearchProvider):
                     in_stock=it.get("in_stock"),
                 )
             )
-        log.info("GeminiGroundedProvider: «%s» → %d результатов", query, len(results))
+        log.info("GeminiGroundedProvider: «%s» → %d кандидатов", query, len(results))
         return results
 
 

@@ -43,6 +43,9 @@ function Row({ r, fmt, flagLabel }) {
           <td colSpan={8}>
             <div className="detail">
               <div><strong>·</strong> {r.flag_reason}</div>
+              {r.candidates_found > 0 && (
+                <div><strong>{t('verify_stats')}:</strong> {r.candidates_verified}/{r.candidates_found}</div>
+              )}
               {r.error && <div className="err">{r.error}</div>}
               {r.query && <div><strong>Запрос:</strong> «{r.query.query}» (×{r.query.pack_multiplier})</div>}
               {r.stage_log?.length > 0 && (

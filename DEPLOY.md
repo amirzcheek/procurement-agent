@@ -72,16 +72,17 @@ DEFAULT_PRICE_PERIOD_MONTHS=6
 
 ### Вариант A — Docker (рекомендуется)
 
-Сборка соберёт React (под под-путь) и упакует с FastAPI. По умолчанию образ
-**лёгкий** — без crawl4ai/Chromium (для `SEARCH_PROVIDER=gemini`/`mock` они не нужны):
+Сборка соберёт React (под под-путь), поставит crawl4ai+Chromium и упакует с FastAPI:
 
 ```bash
 docker compose up -d --build
 docker exec procurement curl -s http://localhost:8080/health   # {"status":"ok"}
 ```
 
-> Нужен `SEARCH_PROVIDER=serper` (рендер страниц браузером)? Соберите с браузером:
-> `INSTALL_CRAWL=true docker compose up -d --build` — образ станет заметно тяжелее.
+> **crawl4ai обязателен** (`INSTALL_CRAWL=true` по умолчанию): им идёт верификация каждой
+> цены — открыть карточку товара и сверить цену/модель. Без него ни одна цена не
+> подтвердится, и все позиции будут «рыночные цены не подтверждены». Образ из-за Chromium
+> тяжёлый и собирается дольше — это нормально.
 
 ### Вариант B — systemd (без Docker)
 

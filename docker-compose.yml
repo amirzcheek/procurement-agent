@@ -8,8 +8,9 @@ services:
         # Под-путь агента на портале (слаг) и базовый адрес API (тот же слаг).
         VITE_BASE: ${VITE_BASE:-/agents/procurement/}
         VITE_API_BASE: ${VITE_API_BASE:-/agents/procurement}
-        # crawl4ai+Chromium нужен только для SEARCH_PROVIDER=serper. Для gemini — false.
-        INSTALL_CRAWL: ${INSTALL_CRAWL:-false}
+        # crawl4ai+Chromium ОБЯЗАТЕЛЕН: им идёт верификация каждой цены (открыть карточку
+        # товара, сверить цену/модель). Без него ни одна цена не подтвердится.
+        INSTALL_CRAWL: ${INSTALL_CRAWL:-true}
     container_name: procurement
     restart: unless-stopped
     env_file: .env

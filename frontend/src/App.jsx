@@ -95,6 +95,9 @@ export default function App() {
             case 'item_start':
               setProgress({ current: ev.index, total: ev.total, label: `${t('position')} ${ev.index + 1}/${ev.total}: ${ev.name}` })
               break
+            case 'verify_progress':
+              setProgress((p) => ({ ...p, label: `${t('position')} ${ev.index + 1}/${ev.total} · ${t('verify_progress', { done: ev.done, total: ev.verify_total })}` }))
+              break
             case 'item_done':
               setItems((prev) => [...prev, ev.report])
               setProgress((p) => ({ ...p, current: ev.index + 1 }))
